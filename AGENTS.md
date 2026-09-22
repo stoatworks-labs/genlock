@@ -168,9 +168,9 @@ gets this right without saying why.
 
 The spec said to guard on `numInputTextures < 2` and on either pointer being
 null, and this does. **What has actually been verified is only that the guards
-work**: `gltest --mixer` calls `ProcessOpenGL` with zero inputs, one input, a
-null Dest and a null Src, gets `FF_FAIL` from all four, no crash, and renders
-normally afterwards. Whether Resolume really does call a mixer with one input
+work**: `gltest --mixer` calls `ProcessOpenGL` with a null input array, zero
+inputs, one input, a null Dest and a null Src, gets `FF_FAIL` from all five,
+no crash, and renders normally afterwards. Whether Resolume really does call a mixer with one input
 while the operator is patching is the SDK example's claim, not a measurement —
 nothing here has been in front of Resolume.
 
@@ -221,7 +221,7 @@ check in `--delay` and was caught only by the zero-delay anchor.
 
 | Check | The number | Where it comes from |
 |---|---|---|
-| `--mixer` guards | none | Four `FFResult` comparisons. No raster, no rasteriser. |
+| `--mixer` guards | none | Five `FFResult` comparisons. No raster, no rasteriser. |
 | `--mixer` sentinel | **135** in summed channel difference | The nearest legitimate card colour is 302 (Dest) and 315 (Src) away from the magenta padding, and the check asserts that too. Half of that is "more padding than picture" — unreachable by any blend of two card colours, and scored 0 by a whole leaked pixel. The first version used a per-channel box that sat 55 away from a magenta quadrant of the card itself. |
 | `--mixer` quadrant means | **1 of 255** | One 8-bit code: the smallest difference the readback can express. Bilinear interpolation of a *constant* region is the constant on any rasteriser. A wrong MaxUV moves a quadrant boundary by tens of pixels, so it fails by tens of codes. The measured interior is inset by `ceil(out/used) + 1` pixels — the width a boundary can smear over, stated in terms of both rasters. |
 | `--mixer` marker position | **one source texel**, in each axis | The quantum the marker's own edges are drawn on. Finer would be asserting something about the filter; coarser would miss a swapped MaxUV. Measured 0.0006 and 0.0000 of the picture against tolerances of 0.005 and 0.010. |
@@ -234,7 +234,7 @@ check in `--delay` and was caught only by the zero-delay anchor.
 | `--crawl` wrap count | **half a period**, in texels of this raster | The drop that counts as a wrap is `kCrawlWrapAmigaPx × pxPerAmiga × 0.5`, not a constant. At 320 wide a fixed 1.0-texel threshold would have missed every wrap. |
 | `--crawl` signal margin | **8 × the tolerance** | A self-check that the raster gives the measurement enough to work with. One period of travel is 4.0 output texels here, 16× the tolerance. |
 | `--roll` locked | **zero bytes** | Losing lock is a branch, not a fade: above the threshold the phase is exactly 0 and `fract(p.y + 0)` returns `p.y`. |
-| `--roll` whole-row | **zero bytes** | A whole-row advance is a rotation, and a rotation of a sampled image is exact. The frames it applies to are found from the raster (`rate × H / fps`), not listed. |
+| `--roll` whole-row | **zero bytes** | A whole-row advance is a rotation, and a rotation of a sampled image is exact. The frames it applies to are found from the raster (`rate × H / fps`), not listed — and "there was at least one" is part of the assertion, so a raster where none landed on a whole row would fail rather than quietly stop making the exact claim. |
 | `--roll` position | **0.05 rows** | Bound under 0.01 rows: the bilinear reconstruction nulls the first alias (< 0.001), 8-bit weight error on ~4 partial rows moves a centroid by ε/2 ≈ 0.002 **independently of the raster**, and subtexel precision adds 1/256. 0.05 is five times that and twenty times smaller than a one-row error. Measured 0.0000 at both rasters. |
 | `--roll` raster | **two rasters** | 640×360 advances a whole 6 rows per frame; 480×270 advances four and a half. This is the check that found the bug: the first version thresholded the band instead of weighting it, so it quantised to whole rows, passed at 360 and failed at 270 by exactly half a row. The *test* was wrong. |
 | `--roll` zero-phase anchor | **0.05 rows** vs the card's own centre | Computed from the generator's rounding, not from `centre × height`: at 270 rows those differ by half a row, which is the size of the error being looked for. |
@@ -412,8 +412,9 @@ moving anything.
   pixels** from either texture's padding, every quadrant within **0.000 of 255**
   of its own colour, and a known marker within **0.0006 and 0.0000** of the
   picture against tolerances of one source texel.
-- **The guards hold.** Zero inputs, one input, a null Dest and a null Src all
-  return `FF_FAIL` without crashing, and two real inputs render afterwards.
+- **The guards hold.** A null input array, zero inputs, one input, a null Dest
+  and a null Src all return `FF_FAIL` without crashing, and two real inputs
+  render afterwards.
 - **A whole-pixel key delay translates the key exactly** — 0 of 164 bytes differ
   across a 4-texel shift — and **a fractional one lands as partial coverage**,
   measured at **0.4941 output texels against a predicted 0.5000**, tolerance

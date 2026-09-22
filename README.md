@@ -129,7 +129,7 @@ M4 Max, macOS 26.4.1, 2026-09-22:
 | Check | Result |
 | --- | --- |
 | Two inputs, two sizes, two MaxUVs | Dest 200×120 of 256×256, Src 96×70 of 128×128, out 320×200: **0 padding pixels** reached the picture, every quadrant within **0.000 of 255**, a known marker within **0.0006** of the picture (tolerance: one source texel) |
-| The missing-input guards | zero inputs, one input, a null Dest and a null Src all return `FF_FAIL` without crashing |
+| The missing-input guards | a null input array, zero inputs, one input, a null Dest and a null Src all return `FF_FAIL` without crashing |
 | Key delay, whole pixel | a 4-texel change translates the key **exactly — 0 of 164 bytes differ** |
 | Key delay, fractional | half a texel recovered from partial coverage at **0.4941 against 0.5000**; tolerance 0.25, derived bound 0.031 |
 | The fill does not move | **0 bytes** across three delays past the edge, **0 bytes** over the whole frame with the key off, and at zero delay the fringe provably does nothing |

@@ -634,12 +634,15 @@ struct Rig
 	}
 
 	/// ProcessOpenGL with the input block deliberately broken, for the
-	/// guards. Restores the rig afterwards.
+	/// guards. `nullIndex` of -2 nulls the whole array. Restores the rig
+	/// afterwards.
 	FFResult RenderBroken( int numInputs, int nullIndex )
 	{
 		FFGLTextureStruct* saved[ 2 ] = { inputs[ 0 ], inputs[ 1 ] };
 		if( nullIndex >= 0 && nullIndex < 2 )
 			inputs[ nullIndex ] = nullptr;
+		if( nullIndex == -2 )
+			process.inputTextures = nullptr;
 		process.numInputTextures = static_cast< FFUInt32 >( numInputs );
 
 		glBindFramebuffer( GL_FRAMEBUFFER, outputFBO );
@@ -648,6 +651,7 @@ struct Rig
 
 		inputs[ 0 ]              = saved[ 0 ];
 		inputs[ 1 ]              = saved[ 1 ];
+		process.inputTextures    = inputs;
 		process.numInputTextures = 2;
 		return result;
 	}
@@ -928,6 +932,7 @@ int runMixer()
 		rig.UploadDest( videoCard( 320, 200 ) );
 		rig.UploadSrc( amigaCard( 320, 200 ) );
 
+		Check( rig.RenderBroken( 2, -2 ) == FF_FAIL, "a null input ARRAY returns FF_FAIL" );
 		Check( rig.RenderBroken( 0, -1 ) == FF_FAIL, "zero input textures returns FF_FAIL" );
 		Check( rig.RenderBroken( 1, -1 ) == FF_FAIL, "one input texture returns FF_FAIL" );
 		Check( rig.RenderBroken( 2, 0 ) == FF_FAIL, "a null Dest returns FF_FAIL" );
@@ -1645,7 +1650,10 @@ int rollAt( int width, int height )
 			++fraction;
 	}
 
-	Check( whole == 0 || rotations == whole,
+	//`whole > 0` is part of the assertion, not a precondition: at a raster
+	//where no frame lands on a whole row the exact claim would silently
+	//stop being made, and this check would pass by having nothing to say.
+	Check( whole > 0 && rotations == whole,
 	       fmt( "whole-row advances are EXACT rotations of frame 0: %.0f of %.0f", rotations, whole ) );
 	Check( worst <= tolerance,
 	       fmt( "the bar is where the rate says: worst %.4f rows (tolerance %.2f) over ", worst, tolerance )
