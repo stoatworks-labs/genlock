@@ -142,7 +142,7 @@ M4 Max, macOS 26.4.1, 2026-09-22:
 | No dead controls | all **19** sweepable of the 23 parameters measurably change the picture; the other four are the About buttons, which `tools/sweep.py` skips |
 | macOS binary | a local build is universal (`x86_64 arm64`), exports `plugMain`, and ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2** |
-| Render cost | 0.018 ms/frame at 720p, 0.032 at 1080p, 0.108 at 4K — 0.6% of a 60 fps frame |
+| Render cost | **under 0.12 ms/frame at 4K** — 0.7% of a 60 fps frame. One pass and three texture fetches is so cheap that repeated runs vary by a factor of two (0.04 to 0.12 ms at 4K, 0.024 to 0.036 at 1080p); the figure worth quoting is the ceiling, not a mean |
 
 Run `tools/verify.sh` before believing any of it.
 

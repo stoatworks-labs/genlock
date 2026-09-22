@@ -449,14 +449,20 @@ moving anything.
 - **The render cost**, by `gltest --bench` (120 frames each, after a 20-frame
   warm-up, `glFinish` on both sides):
 
-  | | ms/frame | % of a 60fps frame |
+  | | ms/frame, worst of five runs | % of a 60fps frame |
   | --- | --- | --- |
-  | 1280×720 | 0.018 | 0.1% |
-  | 1920×1080 | 0.032 | 0.2% |
-  | 2560×1440 | 0.049 | 0.3% |
-  | 3840×2160 | 0.108 | 0.6% |
+  | 1280×720 | 0.020 | 0.1% |
+  | 1920×1080 | 0.036 | 0.2% |
+  | 2560×1440 | 0.054 | 0.3% |
+  | 3840×2160 | 0.118 | 0.7% |
 
-  One pass and three texture fetches is about as cheap as an FFGL plugin gets.
+  One pass and three texture fetches is about as cheap as an FFGL plugin gets
+  — cheap enough that the measurement is the unreliable part. Repeated runs of
+  `--bench --frames 120` vary by a factor of two (4K came back at 0.042 on one
+  run and 0.107 on the next), because a tenth of a millisecond of GPU work is
+  close to what a `glFinish` round trip costs to observe. **Take the ceiling,
+  not the mean, and do not read a 20% change in these as a regression.** A
+  plugin whose cost mattered would need a longer run and a quiet machine.
 
 **Assumed, or not yet done:**
 
