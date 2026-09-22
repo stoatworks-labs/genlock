@@ -197,9 +197,12 @@ FFResult Genlock::InitGL( const FFGLViewportStruct* vp )
 //---------------------------------------------------------------------------
 FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 {
-	//Resolume WILL call a mixer with one input while the operator is still
-	//patching, and it is entitled to hand over a null for either of them.
-	//Both checks, both inputs, before anything is read.
+	//The SDK's Add example guards on the input count and on each pointer,
+	//with a comment saying a host calls a mixer with one input while the
+	//operator is still patching. That is its claim, not something measured
+	//here -- but it costs four comparisons to believe it, and a mixer that
+	//dereferenced a null would take Resolume down with it. Every check
+	//before anything is read.
 	if( pGL == nullptr || pGL->inputTextures == nullptr )
 		return FF_FAIL;
 	if( pGL->numInputTextures < 2 )
@@ -209,7 +212,12 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 
 	const FFGLTextureStruct& dest = *pGL->inputTextures[ 0 ];//the layer below
 	const FFGLTextureStruct& src  = *pGL->inputTextures[ 1 ];//this layer
-	if( dest.Width == 0 || dest.Height == 0 || src.Width == 0 || src.Height == 0 )
+	//HardwareWidth and HardwareHeight are the DENOMINATORS in
+	//GetMaxGLTexCoords, so a zero there is an infinite MaxUV rather than a
+	//small picture.
+	if( dest.Width == 0 || dest.Height == 0 || dest.HardwareWidth == 0 || dest.HardwareHeight == 0 )
+		return FF_FAIL;
+	if( src.Width == 0 || src.Height == 0 || src.HardwareWidth == 0 || src.HardwareHeight == 0 )
 		return FF_FAIL;
 
 	//-----------------------------------------------------------------

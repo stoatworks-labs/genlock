@@ -21,8 +21,10 @@ An Amiga genlock — flaws and all — as an FFGL **mixer** for
 ![The computer's picture keyed over video, with a coloured fringe down one side of every edge](docs/hero.png)
 
 <sub>The repo's two test cards through the plugin at a three-pixel key delay —
-rendered by `gltest`, the offline harness, not captured from Resolume. The cyan
-band down the left of every graphic is the key and the fill disagreeing.</sub>
+rendered by `gltest`, the offline harness, not captured from Resolume. The band
+down every graphic's edges is where the key and the fill disagree: at a left
+edge it is the palette's colour 0 laid over the video, at a right edge it is
+video cut into the graphic, and Edge Tint has coloured both.</sub>
 
 ## The key comes from the wrong clock
 
