@@ -22,11 +22,12 @@ it.*
 > **exactly** (0 of 164 bytes differ). The crawl follows the rate its clock error
 > predicts to **0.0176 texels over 30 frames**. The roll lands **within 0.0000
 > rows** at two rasters. All 21 controls the harness can sweep change the picture.
-> It has **never been loaded into Resolume on macOS**. It is also the fleet's
-> first mixer, so how the host treats it is unconfirmed: whether Resolume calls it
-> with one input while you are patching, whether it drives its clock, and whether
-> it ties **Opacity** to the layer's transition.
-> <!-- ARENA -->It has not yet been run in Resolume on Windows either.<!-- /ARENA -->
+> It has **never been loaded into Resolume on macOS**. On Windows it loads in
+> Resolume Arena 7.27.1, appears as a layer **Blend Mode**, is driven every frame
+> with both inputs, and takes its **Opacity** from the layer's opacity fader. That
+> was measured on software rendering, and nobody has yet looked at its picture
+> inside Resolume. **Arena does not show the Key Source control, so there the key
+> is always Colour 0.**
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
@@ -49,7 +50,7 @@ Avenue uses the same layout in its own folder. It really is **Extra Effects**,
 even though this is a mixer: Resolume Arena 7 has one FFGL plugin folder, and
 sources, effects and mixers all load from it. There is no `Extra Mixers`.
 
-<!-- MIXERUI -->Where Resolume lists a mixer — among the layer's blend modes or its transitions — has not been confirmed yet.<!-- /MIXERUI -->
+In Resolume a mixer appears in a layer's **Blend Mode** list (the same list Resolume uses for transitions), so you choose SW Genlock as the blend mode of the upper layer.
 
 The macOS builds are **Developer ID-signed and notarised**, so the bundle loads
 without any extra steps. The Windows builds are not code-signed. Plugin files are
@@ -68,9 +69,10 @@ An effect gets one picture. A mixer gets two, and Genlock needs both:
 | **Src** | this layer | The computer's picture: the fill, and the colour 0 the key is cut from. |
 
 To patch it, put your video on a layer. Put the computer's picture on the layer
-**above** it, meaning graphics on a flat background colour. Then choose SW Genlock
-for the upper layer. Handed only one picture, the plugin declines to draw, and the
-log records it the first time (see [Diagnostics](#diagnostics)).
+**above** it, meaning graphics on a flat background colour. Then set the upper
+layer's **Blend Mode** to SW Genlock. Handed only one picture, the plugin
+declines to draw, and the log records it the first time (see
+[Diagnostics](#diagnostics)).
 
 The two layers do not have to be the same size. Each input is read at its own
 resolution, and every distance below is measured across the output picture.
@@ -83,7 +85,8 @@ The defaults are a working genlock. Put a graphic on a flat **Workbench blue**
 background (`#0055AA`) on the upper layer and video below it. The blue turns into
 video, and the graphic sits over it with a thin cyan fringe down its edges. The
 fringe walks about one Amiga pixel a second and snaps back. If your graphic is on
-black, set **Key Source** to **Luma**.
+black, set **Key Source** to **Luma** (not possible in Resolume, where Key
+Source is hidden: put the graphic on a flat colour and use Colour 0 instead).
 
 Next, try **Key Delay**. Push it further from zero and the fringe gets wider, and
 flipping the sign swaps which edge gets which kind of fringe. After that, take
@@ -95,6 +98,12 @@ below halfway to watch the overlay lose lock.
 ## Key
 
 **Key Source**: what counts as "show the video here". The default is **Colour 0**.
+
+> **In Resolume this control is missing.** Resolume Arena 7.27.1 does not show
+> Key Source in the mixer's panel (the other 25 controls are all there), so in
+> Resolume the key is always **Colour 0**, and Luma and Alpha cannot be chosen.
+> Measured on Windows on 2026-09-23; why Arena hides it is not known. Put your
+> graphic on a flat background colour and set **Key Colour** to it.
 
 | Key Source | Video shows through where this layer is… |
 |---|---|
@@ -206,8 +215,10 @@ The default is a cyan chosen by eye. This is styling, not a measured colour.
 **Opacity**: the master blend against the layer below, from 0 to 1. At 0 the output
 is the video underneath. It is called Opacity, not Mix, because the FFGL SDK's own
 mixer example says Resolume looks for a parameter with that name to use as the
-mix. If that is true, the layer's transition controls this slider. If it is not,
-it is an ordinary slider. This has not been checked in Resolume yet.
+mix. It is true: **in Resolume this is driven by the layer's Opacity fader**, and
+the Opacity slider in the mixer's panel is overridden, so moving it does nothing.
+Use the layer's fader. (Measured in Arena 7.27.1 on Windows, 2026-09-23. Whether
+the layer's transition or autopilot moves it too has not been tried.)
 
 ---
 
@@ -250,8 +261,8 @@ logged once); whether the host drives the clock and in which unit (at frame 1,
 frame 300 and shutdown); beat and sample-rate calls; and the first 16 changes to
 **Opacity**.
 
-If Opacity changes while the layer's transition moves and nobody touched the
-slider, Resolume is controlling it. A shader that fails to compile shows up as a
+The Opacity lines follow the layer's Opacity fader, not the mixer's own slider,
+which Resolume overrides. A shader that fails to compile shows up as a
 plugin that does nothing, and the reason is in this log.
 
 ---
@@ -276,8 +287,12 @@ average. No timing has been taken inside Resolume.
 
 ## Known limits
 
-- **Never loaded into Resolume on macOS.** The questions about how the host treats
-  a mixer are open, and the log is built to answer them.
+- **Key Source is missing in Resolume.** Arena 7.27.1 does not show it, so the key
+  is always **Colour 0** there; Luma and Alpha keying cannot be reached.
+- **Never loaded into Resolume on macOS.** On Windows, Arena 7.27.1 drives it every
+  frame (measured on software rendering, 2026-09-23), but no picture from inside
+  Resolume has been checked. Whether Resolume ever hands it only one input, and
+  whether a layer transition moves Opacity, are still open.
 - **PAL only**, with no NTSC switch.
 - **Hires and Superhires are arithmetic, not observation**, and the 16-pixel Crawl
   Wrap ceiling is derived from the colour burst, not measured on a genlock.

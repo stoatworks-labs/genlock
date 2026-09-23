@@ -11,10 +11,13 @@
 > form its clock error predicts to **0.0176 texels over 30 frames**, the
 > roll landing **within 0.0000 rows** at two different rasters, and the crawl's
 > speed across the picture **bit-identical** in lores, hires and superhires (see
-> [Status](#status)). It has **never been loaded into Resolume**, on any
-> platform — not once. It is the fleet's first FFGL *mixer*, and several things
-> about how a host treats one are still guesses. Check it in your own rig before
-> trusting it in a show.
+> [Status](#status)). It has **never been loaded into Resolume on macOS**; on
+> Windows, Arena 7.27.1 loads it as a layer blend mode, drives it every frame
+> with both inputs and its clock, and binds its Opacity to the layer's opacity
+> fader — measured from the plugin's own log, on software rendering, with no
+> pixels captured. **Arena does not show the Key Source control, so in Resolume
+> the key is always Colour 0** (see [Status](#status)). It is the fleet's first
+> FFGL *mixer*. Check it in your own rig before trusting it in a show.
 
 An Amiga genlock — flaws and all — as an FFGL **mixer** for
 [Resolume](https://resolume.com) Arena and Avenue.
@@ -59,12 +62,19 @@ because the two clocks differ, that error walks.
 the keyer that works. Here the flaws are the product.
 
 **It is a mixer, not an effect.** It needs a layer below it: that layer is the
-incoming video, and the clip on this layer is the computer's picture.
+incoming video, and the clip on this layer is the computer's picture. In
+Resolume a mixer is chosen as a layer's **Blend Mode** (the same list serves as
+the transition list), so set the upper layer's Blend Mode to SW Genlock.
+
+User guide: [docs/USER-GUIDE.md](docs/USER-GUIDE.md), also at
+https://stoatworks-labs.com/software/genlock/guide/
 
 ## The controls
 
 **Key** — Key Source (Colour 0, Luma or Alpha), Key Colour as a swatch (the
-default is Workbench blue, `#0055AA`), Tolerance, Softness and Invert.
+default is Workbench blue, `#0055AA`), Tolerance, Softness and Invert. Arena
+7.27.1 does not expose Key Source, so in Resolume the key is always Colour 0
+(see [Status](#status)).
 
 **Timing** — Amiga Mode (Lores, Hires or Superhires), Key Delay (−8 to +8
 Amiga pixels, signed; negative lays colour 0 over the video, positive cuts video
@@ -89,7 +99,8 @@ the Dissolve position.
 
 **Look** — Fringe and Edge Tint, which colour the band where the key and the
 fill disagree (the disagreement is there without them; real hardware puts chroma
-crosstalk on it, and this is where you say how much), and Opacity.
+crosstalk on it, and this is where you say how much), and Opacity — which in
+Resolume is the layer's own Opacity fader, measured on Arena 7.27.1.
 
 ## Build
 
@@ -108,7 +119,9 @@ macOS builds universal (arm64 + x86_64) by default. Add
 
 The install path is **Extra Effects**, although this is a mixer. Resolume has one
 FFGL folder, and sources, effects and mixers all load from it: Arena 7's binary
-names no other, and the FFGL SDK sends its own mixer example there. (Before
+names no other, and the FFGL SDK sends its own mixer example there. Measured on
+Windows too (Arena 7.27.1, 2026-09-23): there is no `Extra Mixers` folder, and
+`Genlock.dll` in Extra Effects loaded and registered as a mixer. (Before
 v0.1.0 this said `Extra Mixers`, which Arena never reads.)
 
 ## Building and testing
@@ -142,9 +155,10 @@ where it comes from.
 
 ## Status
 
-**v0.1.0, unreleased, and honestly early.** Verified by measurement on an Apple
-M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and Crawl Wrap rows
-2026-09-23:
+**Released at v0.1.0 on 2026-09-23, and honestly early.** Verified by
+measurement on an Apple M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and
+Crawl Wrap rows, the CI rows and the Windows host row 2026-09-23 (what Arena
+does with it once chosen is the table after this one):
 
 | Check | Result |
 | --- | --- |
@@ -166,26 +180,53 @@ M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and Crawl Wrap rows
 | No dead controls | all **21** sweepable of the 26 parameters measurably change the picture, at 480×270 and 320×180; the other five are the About text and its buttons, which `tools/sweep.py` skips |
 | macOS binary | a local build is universal (`x86_64 arm64`), exports `plugMain`, and ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2 / 26 params**, and loading it that way writes the load-time log line naming the bundle |
+| A second rasteriser | GitHub's macOS runner has **no GPU**, so the harness ran on Apple's software renderer: all **9** ctest suites (names, mixer, delay, crawl, roll, fader, modes, defaults, mutation) and the sweep at 320×180 **passed** |
+| Windows build | the x64 DLL **compiled with MSVC** on GitHub's Windows runner |
+| Windows host | Resolume Arena **7.27.1**, Windows x64 (Mesa llvmpipe): `Genlock.dll` in Extra Effects **loaded** and registered as `'SW Genlock' uid: GL01 category: 2` — the category Resolume's own blend modes and transitions register under — and **SW Genlock is in every layer's Blend Mode list**. There is no Extra Mixers folder on Windows either |
 | Render cost | **under 0.12 ms/frame at 4K** — 0.7% of a 60 fps frame. One pass and three texture fetches is so cheap that repeated runs vary by a factor of two (0.04 to 0.12 ms at 4K, 0.024 to 0.036 at 1080p); the figure worth quoting is the ceiling, not a mean |
 
 Run `tools/verify.sh` before believing any of it.
 
+**How Arena drives it — measured 2026-09-23** in Resolume Arena 7.27.1 (build
+15990) on win-lab (Windows x64, Mesa llvmpipe, no GPU), with a CI (MSVC) build
+of the v0.1.0 source: SW Genlock set as layer 2's Blend Mode over layer 1, both
+layers carrying a still picture, driven through Arena's REST API, and the
+plugin's own log (`%LOCALAPPDATA%\genlock\logs\genlock.2026-09-23.log`) read
+back. A manual probe: the fleet's Arena gate cannot gate a mixer (it knows
+registration categories 1 and 3 only, looks for the plugin in the source list,
+and can only mount a clip effect or a source).
+
+| Question | Measured answer |
+| --- | --- |
+| Does it load, and as what? | Yes: Arena scans Extra Effects and loads `Genlock.dll` at scan time; it registers as category 2, beside Resolume's own blend modes |
+| Is it instantiated as a blend mode? | Yes: `instance created`, InitGL at **1280×720** (the composition size), host `Resolume Arena 7.27.1 15990`, `SetSampleRate 44100` |
+| What do the two inputs look like? | `Dest 1280x720 of 1280x768, Src 1280x720 of 1280x768` — **both padded**, so MaxUV.y is not 1 in a real host and the per-input MaxUV handling is exercised |
+| Does Resolume drive a mixer's clock? | **Yes**: `SetTime` before frame 1 and on every frame (412 calls over 412 frames), in **milliseconds** since Arena started (about 4.1e6; the unit detector voted ms 4–0). `SetBeatInfo` every frame (128 bpm) |
+| Is a mixer called with one input while patching? | **Not observed.** Clearing the layer below and refilling it gave no `guard:` line: Arena kept passing two inputs, the lower layer's empty composite. An empty bottom layer from the start was not tried |
+| Is `Opacity` bound? | **Yes — to the layer's Opacity, not the transition.** The log followed the layer's opacity 1 → 0.42 → 1 (`Opacity 1 at frame 1`, `0.42 at frame 78`, `1 at frame 204`); writing the mixer's own Opacity (0.61, then 0.13) never reached the plugin, and Arena read it back as 0.42. Whether the layer's transition or autopilot also drives it was not tested |
+| Are the parameters all there? | **25 of 26.** Every name, type and default in Arena's mixer panel matches the declaration, except that **Key Source is not exposed at all** |
+
+**Known limitation: in Resolume, Key Source is stuck at Colour 0.** Arena's
+mixer panel leaves out Key Source — the first declared parameter, id 0 — so the
+key is always the default Colour 0 there, and Luma and Alpha keying cannot be
+reached. Why is not known (one guess: Arena treats a mixer's first parameter
+specially). It was found on Windows; macOS has not been looked at.
+
+What that run did **not** show is a picture: a mixer's output exists only in the
+composition, and Arena's REST thumbnails do not serve it. So "renders correctly
+in Arena" is not claimed — only that it initialised and was called every frame
+with no error lines.
+
 **Not done, and the honest list is long.** It has **never been loaded into
-Resolume** — not on macOS, not on Windows, not once — so every mixer-specific
-claim about the *host* is a guess: that it binds a parameter named `Opacity` to the transition position (the SDK's
-own example says it does, which is why the master blend carries that name
-instead of the `Mix` it would otherwise have), that it calls a mixer with one
-input while the operator is patching, and that it drives a mixer's clock at all.
-The **Windows build has never been compiled**; CI exists and has never run,
-because there is no remote. Nothing has run on a **rasteriser other than this
-Mac's** — the tolerances are derived from the OpenGL specification rather than
-fitted to a measurement, precisely so that they survive a GPU-less runner, but
-derived is not proven. Premultiplied alpha is assumed rather than measured. The
-**tear** at the roll seam is a look, not a model: nothing measures it and no
-real hardware was consulted. There are **no presets**, no OpenFX port, no
-browser demo and no user guide — which is why the About block deliberately
-carries no guide link. `StoatworksAbout.h` and `ATTRIBUTIONS.md` are provisional
-hand copies.
+Resolume on macOS**, and no frame of its output in Resolume has been looked at.
+Whether a mixer is ever called with one input (the SDK example's claim) and
+whether the layer's transition moves `Opacity` are still open. The CI run proves
+the checks on a second rasteriser, and the Arena run above was on software
+rendering; the render cost is still macOS-only. The
+universal build has never run on an Intel Mac. Premultiplied alpha is assumed
+rather than measured. The **tear** at the roll seam is a look, not a model:
+nothing measures it and no real hardware was consulted. There are **no
+presets**, no OpenFX port and no browser demo.
 
 **Amiga Mode and Crawl Wrap are arithmetic, not observation.** The rule — pixel
 clocks scale with the mode, time errors do not — is argued in `Controls.h` and
@@ -195,11 +236,12 @@ nothing like a quarter-size lores fringe. The 16-pixel ceiling on Crawl Wrap is
 derived from the length of the colour burst, not measured on any genlock. PAL
 only: no NTSC.
 
-**The log is ready for the first Arena session and has never been read from
-one.** It records where the host loaded the bundle from, the host's name and
-version, whether a mixer is called with one input, whether its clock is driven
-and in what unit, and whether `Opacity` moves with the transition — the open
-questions above. [AGENTS.md](AGENTS.md) says what each line answers.
+**The log answered most of it.** It records where the host loaded the bundle
+from, the host's name and version, whether a mixer is called with one input,
+whether its clock is driven and in what unit, and every change to `Opacity`.
+The first Arena session (above) settled the clock, the inputs and the `Opacity`
+binding; the one-input call and the transition are still open.
+[AGENTS.md](AGENTS.md) says what each line answers.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, the traps, and the fleet's only written account of

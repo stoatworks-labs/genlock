@@ -3,9 +3,14 @@
 **What it is:** an FFGL 2.1 **mixer** for Resolume Arena/Avenue that keys this
 layer's colour 0 over the layer below the way an Amiga genlock did — badly, on
 purpose. C++17 + GLSL 4.10, CMake, universal macOS `.bundle` and a Windows
-`.dll`. MIT. Intended home `github.com/stoatworks-labs/genlock`; **it is not
-there yet** — v0.1.0 is local, unreleased and has never been in front of
-Resolume.
+`.dll`. MIT. Public at `github.com/stoatworks-labs/genlock`, released at
+v0.1.0 on 2026-09-23. Never loaded into Resolume on macOS; on Windows, Arena
+7.27.1 loads it as a layer blend mode, drives it every frame with both inputs,
+`SetTime` in milliseconds and `SetBeatInfo`, and binds its `Opacity` to the
+layer's opacity fader — measured 2026-09-23 from the plugin's own log, no pixels
+captured. **Arena does not expose Key Source, so in Resolume the key is always
+Colour 0.** See "What Resolume does with a mixer". User guide:
+`docs/USER-GUIDE.md`.
 
 `CLAUDE.md` is the command reference. This file is the *why*, and it carries two
 things worth more than the plugin: **how an FFGL mixer actually behaves**, which
@@ -165,17 +170,23 @@ activate(0), bind(0), which means declaring them interleaved:
 Both activations first would unbind unit 0 twice and leave unit 1 bound. `Add`
 gets this right without saying why.
 
-### What Resolume passes with one input — NOT known
+### What Resolume passes with one input — not observed, still open
 
 The spec said to guard on `numInputTextures < 2` and on either pointer being
-null, and this does. **What has actually been verified is only that the guards
-work**: `gltest --mixer` calls `ProcessOpenGL` with a null input array, zero
-inputs, one input, a null Dest and a null Src, gets `FF_FAIL` from all five,
-no crash, and renders normally afterwards. Whether Resolume really does call a mixer with one input
-while the operator is patching is the SDK example's claim, not a measurement —
-nothing here has been in front of Resolume.
+null, and this does. `gltest --mixer` calls `ProcessOpenGL` with a null input
+array, zero inputs, one input, a null Dest and a null Src, gets `FF_FAIL` from
+all five, no crash, and renders normally afterwards.
 
-### Things still unknown about mixers
+Whether Resolume really does call a mixer with one input while the operator is
+patching is the SDK example's claim. **MEASURED 2026-09-23** (Arena 7.27.1 on
+win-lab, see below): clearing the layer below while SW Genlock was the upper
+layer's blend mode, and then refilling it, produced **no** one-input call — no
+`guard:` line in the log. Arena kept passing two inputs, the lower layer's
+empty composite. So the claim was not observed in that sequence; it may still
+happen in others (an empty bottom layer from the start was not tried). The
+guards stay.
+
+### What Resolume does with a mixer
 
 - **Where Resolume reads them from: Extra Effects, the same folder as every
   other FFGL plugin.** This said `Extra Mixers` until the v0.1.0 release, on the
@@ -184,22 +195,71 @@ nothing here has been in front of Resolume.
   `FFGLMixer` class, and no `Extra Mixers` anywhere; the FFGL SDK's README sends
   every plugin -- its `Add` mixer example included -- to Extra Effects. An
   install to Extra Mixers would have put the bundle where Arena never looks.
-- **Whether Resolume binds a parameter by name.** `Add`'s comment says in as
-  many words that "Resolume will look for a param named `Opacity` for mix
-  value", and `ffglqs::Mixer` declares its own under the name `mixVal`. That is
-  why this plugin's master blend is called **`Opacity`** and not `Mix`, which is
-  what the spec called it — of the two names, one has evidence behind it. If
-  Resolume does bind it, the host's transition control drives the fader, which
-  is the right behaviour for a mixer. If it does not, it is an ordinary slider
-  with an odd name. **Untested.**
-- **Whether a mixer gets `SetTime` at all.** `FF_CAP_SET_TIME` reports 1 here,
-  the same as for an effect, but whether Resolume drives a mixer's clock the
-  way it drives an effect's is unknown, and this plugin's crawl and roll are
-  both functions of time.
+  **MEASURED on Windows, 2026-09-23** (Resolume Arena 7.27.1, Windows x64,
+  Mesa llvmpipe): Arena's `Documents\Resolume Arena` folder has no `Extra
+  Mixers` there either; `Genlock.dll` placed in Extra Effects was loaded
+  ("Plugin was successfully loaded").
+- **How Resolume presents a mixer: as a layer's Blend Mode. MEASURED on
+  Windows, 2026-09-23** (same run). Arena registered it as
+  `'SW Genlock' uid: GL01 category: 2`, and category 2 is the category of
+  Resolume's own blend modes and transitions — Add, Alpha, Cube, Dissolve, Luma
+  Key, Wipe Ellipse and the rest all register as category 2. `SW Genlock`
+  appears in **every** layer's **Blend Mode** dropdown (REST:
+  `/composition/layers/N` → `video.mixer` "Blend Mode" options). So an operator
+  chooses a mixer as the blend mode of the upper layer, and the same list
+  serves as the transition list. This was a listing, not a render: what the
+  host does with the mixer once chosen is below.
 
-Every one of these is now a line in the diagnostics log, written for the first
-session in front of Arena to answer — see "Reading the log after an Arena run"
-below. None of them has been answered yet.
+**How Arena drives it — MEASURED 2026-09-23** in Resolume Arena 7.27.1 (build
+15990) on win-lab (Windows x64, Mesa llvmpipe, no GPU), with a CI (MSVC) build
+of the v0.1.0 source. SW Genlock was set as layer 2's Blend Mode over layer 1,
+both layers carrying a still picture, driven through Arena's REST API, and the
+plugin's own log read back from
+`%LOCALAPPDATA%\genlock\logs\genlock.2026-09-23.log`. This was a **manual
+probe**: the fleet's Arena gate cannot gate a mixer — it knows registration
+categories 1 and 3 only, looks for the plugin in the source list, and can only
+mount a clip effect or a source.
+
+- **Load.** Arena scans Extra Effects and loads
+  `...\Resolume Arena\Extra Effects\Genlock.dll` — the `plugin loaded` and
+  `loaded from` lines are written at scan time — and it registers as category 2.
+- **Instantiation as a blend mode.** `instance created`, then InitGL at a
+  viewport of **1280×720**, the composition size; `host Resolume Arena version
+  7.27.1 15990`; `SetSampleRate 44100`.
+- **The two inputs arrive padded.** First frame: `Dest 1280x720 of 1280x768,
+  Src 1280x720 of 1280x768` — 768 rows for 720. So MaxUV.y is not 1 in a real
+  host, and the per-input MaxUV handling above is exercised, not theoretical.
+- **Resolume drives a mixer's clock and transport.** `SetTime` is called before
+  frame 1 and on every frame — **412 calls over 412 frames** — in
+  **milliseconds** (about 4.1e6, milliseconds since Arena started; the unit
+  detector voted ms 4–0). `SetBeatInfo` arrives every frame (128 bpm).
+- **One input: not observed.** See the section above.
+- **`Opacity` is bound — to the LAYER's Opacity.** `Add`'s comment says "Resolume
+  will look for a param named `Opacity` for mix value", which is why the master
+  blend carries that name and not the spec's `Mix`. It does: the plugin logged
+  `Opacity 1 at frame 1`, `0.42 at frame 78`, `1 at frame 204`, exactly as the
+  layer's opacity was set 1 → 0.42 → 1. Writing the mixer's own `Opacity`
+  parameter (0.61, then 0.13) through the API never reached the plugin, and
+  Arena read it back as the layer's 0.42. So in Resolume the master blend is
+  the **layer's opacity fader**, not a slider in the mixer's panel. Whether the
+  layer's transition or autopilot also drives it was **not tested**.
+- **Parameters: 25 of 26 exposed, and the missing one is Key Source.** Arena's
+  mixer panel (REST `video.mixer`) shows 25 of the 26 declared parameters, and
+  every name, type and default matches the declaration — except that **Key
+  Source** (id 0, the first parameter) is **not exposed at all**: it is absent
+  from the layer's JSON. Why is not known; one guess is that Arena treats a
+  mixer's first parameter specially. The consequence: **in Resolume the key
+  source is stuck at its default, Colour 0**, and Luma and Alpha keying cannot
+  be reached. See the trap below. No code was changed for it.
+- **No pixels were grabbed.** A mixer's output exists only in the composition,
+  and Arena's REST thumbnails do not serve it. So "renders correctly in Arena"
+  is **not** claimed. What is claimed is that it initialised and was called
+  every frame with no error lines in the log.
+
+Still open after that session: whether a mixer is called with one input in any
+other patching sequence, whether the layer's transition or autopilot moves
+`Opacity`, why Key Source is hidden, and anything at all on macOS. See "Reading
+the log after an Arena run" for what each log line answers.
 
 ---
 
@@ -255,7 +315,7 @@ check in `--delay` and was caught only by the zero-delay anchor.
 | `--modes` Key Delay | **0.25 texels**, and **zero bytes** | −8 of the mode's pixels is −16, −8 and −4 texels at 640 wide and −8, −4, −2 at 320 — whole numbers, asserted. Measured −16.0024, −8.0024, −4.0024 and −8.0045, −4.0045, −2.0045 (a constant −0.002/−0.005 that is the card's own quantisation, identical in every mode). And hires at −8 is lores at −4 **byte for byte**, superhires at −8 is lores at −2: (−8)/640 and (−4)/320 are the same float, which is checked on the CPU first. |
 | `--modes` tear | **0.25 texels**, and **zero bytes** | The fill's edge (key off) in the two seam rows against the middle row, which leans not at all, at roll phase exactly 0. Predicted from the shader's own lean and the float throw: −28.1333 texels at 640, −13.7333 at 320; measured −28.1294 and −13.7294 in all three modes. The bound uses 85 codes of contrast, not 170, because the fill runs 170→255 in blue. The three torn frames are the same bytes. |
 | `--modes` wrap | **1e-9 px**, **0.25 texels**, a **wrap count**, and the **reach** | Crawl Wrap at 4 pixels of the mode, lores and hires, 60 frames: the reduced phase against `PositiveMod(rate·t, 4)`; the key edge against it in texels; 3 wraps (lores) and 6 (hires) predicted and counted with a half-period threshold in texels of THIS raster and mode; and the furthest the key walks before it snaps within one frame's travel of the wrap and never past it — 7.933 of 8.000 texels, 3.933 of 4.000, 3.974 of 4.000, 1.974 of 2.000. The rate (14 lores px/s) puts no wrap on a frame boundary, so no count depends on which way a rounding falls. |
-| `--defaults` | **bitwise** | The plugin's reduced crawl and delay over 60 frames against the pre-feature formula restated with its literals (7093790 Hz, a wrap of 1.0), at Clock Error 0.6 so the one-pixel wrap is crossed eleven times. The same double arithmetic in the same order, so equal is the only honest claim. Plus every control's name, place and default, 25 parameters, About last. |
+| `--defaults` | **bitwise** | The plugin's reduced crawl and delay over 60 frames against the pre-feature formula restated with its literals (7093790 Hz, a wrap of 1.0), at Clock Error 0.6 so the one-pixel wrap is crossed eleven times. The same double arithmetic in the same order, so equal is the only honest claim. Plus every control's name, place and default, 26 parameters (21 controls and the 5-entry About block), About last. |
 | `--mutation` | **fails** | The shipped fragment shader with `uv - vec2( KeyDelay` changed to `uv + vec2( KeyDelay` — one character, asserted — fails the Key Delay claims; the unmutated text through the same test hook passes them and renders the default path's bytes. |
 | `--bench` | not asserted | There is no threshold worth asserting on somebody else's GPU. |
 
@@ -313,13 +373,16 @@ it is computed from the raster rather than typed.
   compiles of the same text in one context. A compiler that compiled the same
   source differently twice would fail it; none is known to.
 
-**What this pass does not prove** is unchanged from above: derived is not proven,
-and nothing here has run anywhere but this Mac.
+**What this pass does not prove** is unchanged from above: derived is not proven
+for every rasteriser.
 
 **What this pass does not prove.** Every tolerance is derived from the GL spec's
-own guarantees rather than from a measurement — but *derived* is not *proven*,
-and none of it has run on a rasteriser other than this Mac's. A llvmpipe run is
-what would settle it, and CI has never run.
+own guarantees rather than from a measurement — but *derived* is not *proven*.
+One second rasteriser has now run it: on 2026-09-23 `ci.yml` ran on GitHub's
+macOS runner, which has no GPU, so the harness fell back to Apple's software
+renderer, and all 9 ctest suites (names, mixer, delay, crawl, roll, fader,
+modes, defaults, mutation) and the sweep at 320×180 passed. That is two
+rasterisers, not all of them; llvmpipe has not run the checks.
 
 ---
 
@@ -374,6 +437,23 @@ no host can instantiate the plugin at all: `instantiateGL` pushes every declared
 default back through the setters and deletes the instance if one fails, and the
 base class's `SetTextParameter` is a stub that returns exactly that failure.
 
+**Arena hides a mixer's first parameter — so Key Source cannot be reached in
+Resolume.** Measured 2026-09-23 on Arena 7.27.1 (Windows): the mixer panel
+(REST `video.mixer`) exposes 25 of the 26 declared parameters, every one
+matching, but Key Source — id 0 — is absent from the layer's JSON. The key is
+stuck at the default, Colour 0; Luma and Alpha are unreachable there. Nothing in
+the harness or `oxbow probe` can see this, because both read the declaration,
+and the declaration is right. Why Arena drops it is not known (one guess: it
+treats a mixer's first parameter specially). Not fixed in v0.1.0; if it is
+fixed, it is by what is declared at index 0, and it has to be re-checked in
+Arena, not in the harness.
+
+**Arena's REST `Opacity` on a mixer is the layer's.** Resolume binds a mixer
+parameter named `Opacity` to the layer's Opacity, so writing the mixer's own
+`Opacity` through the API is overridden and reads back as the layer's value. A
+probe that sets the mixer's slider and waits for the plugin to see it will wait
+forever; set the layer's opacity.
+
 **Resolume's clock overflows a float.** It counts milliseconds from the session
 start, and past about 4.99e8 a 32-bit float can no longer represent consecutive
 milliseconds. Anything computed from an absolute host time in float stops
@@ -383,7 +463,8 @@ Wrap` for the crawl, under one picture height for the roll.
 
 **The host's clock unit has to be worked out by observation.** The FFGL header
 never says whether `SetTime` is seconds or milliseconds and hosts disagree;
-Resolume sends milliseconds. `timing::Clock` votes on the ratio against a real
+Resolume sends milliseconds (to a mixer too: measured 2026-09-23 on Arena
+7.27.1, about 4.1e6 ms, the detector voting ms 4–0). `timing::Clock` votes on the ratio against a real
 clock for four frames, exactly as tinsel does. The harness declares its unit
 instead of letting the calibration infer one.
 
@@ -593,8 +674,9 @@ moving anything.
   which `tools/sweep.py` skips.
 - **The load-time log line works in a real `dlopen`**: `oxbow probe` loads the
   bundle and the log says `loaded from .../Genlock.bundle/Contents/MacOS/Genlock`
-  — `verify.sh` asserts it. That is the only one of the new log lines that has
-  been exercised by anything but the harness.
+  — `verify.sh` asserts it. On macOS that is the only log line exercised by
+  anything but the harness; on Windows, Arena 7.27.1 exercised all of them
+  except the `guard:` lines (2026-09-23, below).
 - **The build is universal and exports `plugMain`** — `lipo` reports
   `x86_64 arm64`, `nm -gU` finds `_plugMain`, the plist names a binary that
   exists, and it ad-hoc signs.
@@ -602,6 +684,25 @@ moving anything.
   About block gained its User guide button at registration)
   through `oxbow probe`, with Amiga Mode at index 7 and Crawl Wrap at 11 in the
   Timing group.
+- **The checks pass on a second rasteriser** (2026-09-23): `ci.yml` on
+  GitHub's GPU-less macOS runner, Apple's software renderer — all 9 ctest suites
+  and the sweep at 320×180. See "Every number in the harness".
+- **The Windows DLL compiles**: MSVC on GitHub's Windows runner, 2026-09-23.
+- **Arena on Windows loads it and lists it as a blend mode** (Resolume Arena
+  7.27.1, Windows x64, Mesa llvmpipe, 2026-09-23): loaded from Extra Effects,
+  registered as `'SW Genlock' uid: GL01 category: 2`, present in every layer's
+  Blend Mode list. See "What Resolume does with a mixer".
+- **Arena drives it as a blend mode** (Arena 7.27.1 build 15990 on win-lab,
+  Windows x64, Mesa llvmpipe, CI MSVC build of v0.1.0, 2026-09-23; a manual
+  probe through the REST API, read from the plugin's own log): instantiated with
+  InitGL at 1280×720; both inputs arrive padded (`1280x720 of 1280x768`);
+  `SetTime` on every frame (412 of 412) in milliseconds, and `SetBeatInfo` every
+  frame; no one-input call when the layer below was cleared and refilled;
+  `Opacity` followed the **layer's** opacity 1 → 0.42 → 1 and the mixer's own
+  slider was overridden; 25 of 26 parameters exposed, matching the declaration,
+  with **Key Source missing**. No error lines. No pixels were captured, so a
+  correct render in Arena is not claimed. See "What Resolume does with a
+  mixer".
 - **The render cost**, by `gltest --bench` (120 frames each, after a 20-frame
   warm-up, `glFinish` on both sides):
 
@@ -622,11 +723,21 @@ moving anything.
 
 **Assumed, or not yet done:**
 
-- **Never loaded into Resolume.** Not once. Everything above was compiled,
-  rendered and measured offline against the real plugin class in a headless CGL
-  context. Every mixer-specific claim about the *host* — that it binds `Opacity`, that it calls a mixer with
-  one input while patching, that it drives a mixer's `SetTime` — is unverified.
-  The log is now built to answer each of them; nobody has read one from Arena.
+- **Never loaded into Resolume on macOS.** Everything above except the Windows
+  host lines was compiled, rendered and measured offline against the real
+  plugin class in a headless GL context. On Windows, Arena drives it (above);
+  still unverified about the *host* are a one-input call in any patching
+  sequence but the one tried, and whether the layer's transition or autopilot
+  moves `Opacity`.
+- **KNOWN LIMITATION: Key Source cannot be reached in Resolume.** Arena 7.27.1
+  does not expose it (2026-09-23, Windows), so the key there is always Colour 0;
+  Luma and Alpha work in the harness and nowhere an operator can reach. Why is
+  not known, and nothing was changed for it. See "The traps".
+- **No frame of its output in Resolume has been looked at.** Arena's REST
+  thumbnails do not serve a mixer's output, so the Arena run shows it was
+  driven, not that it drew the right picture.
+- **The universal build has never run on an Intel Mac**, and the render cost is
+  macOS-only.
 - **Hires and superhires are arithmetic, not observation.** The model — pixel
   clocks scale, time errors do not — is argued in `Controls.h` and measured
   against itself here. Nobody has put a hires Workbench through a real genlock
@@ -635,11 +746,10 @@ moving anything.
   real bandwidth would answer differently.
 - **The Crawl Wrap ceiling of 16 is a derivation from the burst's length**, not
   a measurement of how far any genlock lets the phase go before it drops lock.
-- **Never run on another rasteriser.** See "Every number in the harness". The
-  tolerances are derived from the GL spec rather than fitted, and the whole
-  point of that was to survive llvmpipe, but nothing has proved it.
-- **Windows has never been compiled.** CI exists and has never run; there is no
-  remote.
+- **Two rasterisers, not all.** See "Every number in the harness". The
+  tolerances are derived from the GL spec rather than fitted; they held on this
+  Mac's GPU and on the CI runner's software renderer, and llvmpipe has not run
+  the checks.
 - **Premultiplied alpha is assumed.** The key un-premultiplies before measuring
   a colour and the composite blends premultiplied, following
   `resolume-luma-keyer`. Whether Resolume hands a mixer premultiplied textures
@@ -652,8 +762,6 @@ moving anything.
   because a real genlock's fringe also carries chroma crosstalk. The default is
   a cyan chosen by eye.
 - **No OpenFX port and no browser demo.** Neither is required for 0.1.0.
-- **No user guide**, which is why the About block deliberately carries no guide
-  link.
 
 ---
 
@@ -662,28 +770,31 @@ moving anything.
 The plugin writes one file, `~/Library/Logs/genlock/genlock.YYYY-MM-DD.log`
 (`%LOCALAPPDATA%\genlock\logs\` on Windows). Everything below was added so
 that **one session in front of Arena** answers the open questions about mixers.
-None of it changes a pixel, and none of it has been read from Arena yet.
+None of it changes a pixel. The first such session was 2026-09-23 on Arena
+7.27.1 (Windows, win-lab); the right-hand column says what it measured.
 
 Before the session: run nothing from the harness without `GENLOCK_LOG_DIR`
 pointing elsewhere, or move the day's log aside — harness lines say `loaded from
 .../gltest` and are noise here. Install with `cmake --install build`, start
-Arena, put the mixer on a layer as its transition, crossfade by hand and by
-autopilot, patch and unpatch the layer below, quit.
+Arena, set the upper layer's **Blend Mode** to SW Genlock (the same list is the
+transition list), crossfade by hand and by autopilot, patch and unpatch the
+layer below, quit. `Opacity` moves with the **layer's** Opacity fader, not the
+mixer's own slider (see below).
 
-| Line | What it answers |
-|---|---|
-| `plugin loaded build=…` then `loaded from <path>` | Written at **load time**, from a file-scope constructor, before any instance exists. Its presence says Arena scanned the folder and `dlopen`ed the bundle; the path says **which** folder — the Extra Mixers question. No file at all means Arena never looked there. This line and nothing after it means it loaded the file and never instantiated it. |
-| `instance created` | A plugin object exists. Hosts often make one at scan time to read the parameters, so one of these alone is not "the operator chose it". |
-| `host <name> version <v>` | `SetHostInfo`: makes the log evidence about a known Arena build, not about "Resolume". |
-| `SetSampleRate <n>` | Whether a host sends a mixer the audio rate. |
-| `GL vendor=…` / `initialised, viewport WxH` | `InitGL` ran — the mixer was really put in a layer — and at what size. |
-| `guard: called with 1 input(s) -- returned FF_FAIL (logged once)` | **Whether Resolume calls a mixer with one input while patching**, the SDK example's claim. Also `no input array`, `a null Dest`/`Src`, `a zero-sized …`. Each is logged the first time only. Its absence after patching and unpatching is also an answer. |
-| `first SetTime <t> (before frame n)` | That the host calls `SetTime` on a mixer at all, and whether before the first frame. |
-| `clock at frame 1 / frame 300 / DeInitGL: SetTime called|NEVER called (N calls, last t), unit seconds|milliseconds|undecided, votes s=… ms=…, elapsed …` | **Whether Resolume drives a mixer's clock**, and in which unit. `NEVER called` means the crawl and roll ran on the wall clock (right rate, wrong origin). `undecided` at frame 300 means the host's clock did not advance like a clock for four frames in five seconds — paused, or looping. |
-| `first frame: Dest WxH of HWxHH, Src …` | What sizes and paddings a mixer's two inputs really arrive at — the case the two MaxUVs exist for. |
-| `first SetBeatInfo bpm … bar phase …`, and `… SetBeatInfo calls` at DeInitGL | Whether a mixer gets the transport. |
-| `Opacity <v> at frame <n>` (the first 16 changes) | **Whether Resolume binds a parameter named `Opacity` to the transition.** If these lines appear while the layer's crossfader or autopilot moves and nobody touched the slider, it binds. If they appear only when the slider is dragged, it does not. |
-| `DeInitGL after N frames, …` | The instance's life, and the clock's final state. |
+| Line | What it answers | Measured 2026-09-23, Arena 7.27.1 on Windows |
+|---|---|---|
+| `plugin loaded build=…` then `loaded from <path>` | Written at **load time**, from a file-scope constructor, before any instance exists. Its presence says Arena scanned the folder and `dlopen`ed the bundle; the path says **which** folder (Extra Effects on Windows, per Arena's own log, 2026-09-23). No file at all means Arena never looked there. This line and nothing after it means it loaded the file and never instantiated it. | Both, at scan time, from `...\Resolume Arena\Extra Effects\Genlock.dll`. |
+| `instance created` | A plugin object exists. Hosts often make one at scan time to read the parameters, so one of these alone is not "the operator chose it". | Present. |
+| `host <name> version <v>` | `SetHostInfo`: makes the log evidence about a known Arena build, not about "Resolume". | `Resolume Arena version 7.27.1 15990`. |
+| `SetSampleRate <n>` | Whether a host sends a mixer the audio rate. | Yes: `44100`. |
+| `GL vendor=…` / `initialised, viewport WxH` | `InitGL` ran — the mixer was really put in a layer — and at what size. | Yes, at **1280×720**, the composition size. |
+| `guard: called with 1 input(s) -- returned FF_FAIL (logged once)` | **Whether Resolume calls a mixer with one input while patching**, the SDK example's claim. Also `no input array`, `a null Dest`/`Src`, `a zero-sized …`. Each is logged the first time only. Its absence after patching and unpatching is also an answer. | **None.** Clearing and refilling the layer below gave no `guard:` line; Arena kept passing two inputs. An empty bottom layer from the start was not tried. |
+| `first SetTime <t> (before frame n)` | That the host calls `SetTime` on a mixer at all, and whether before the first frame. | Yes, before frame 1. |
+| `clock at frame 1 / frame 300 / DeInitGL: SetTime called|NEVER called (N calls, last t), unit seconds|milliseconds|undecided, votes s=… ms=…, elapsed …` | **Whether Resolume drives a mixer's clock**, and in which unit. `NEVER called` means the crawl and roll ran on the wall clock (right rate, wrong origin). `undecided` at frame 300 means the host's clock did not advance like a clock for four frames in five seconds — paused, or looping. | Called on every frame (412 of 412), **milliseconds** (about 4.1e6, votes ms 4–0). |
+| `first frame: Dest WxH of HWxHH, Src …` | What sizes and paddings a mixer's two inputs really arrive at — the case the two MaxUVs exist for. | `Dest 1280x720 of 1280x768, Src 1280x720 of 1280x768`: both padded. |
+| `first SetBeatInfo bpm … bar phase …`, and `… SetBeatInfo calls` at DeInitGL | Whether a mixer gets the transport. | Yes, every frame, 128 bpm. |
+| `Opacity <v> at frame <n>` (the first 16 changes) | **Whether Resolume binds a parameter named `Opacity` to the transition.** If these lines appear while the layer's crossfader or autopilot moves and nobody touched the slider, it binds. If they appear only when the slider is dragged, it does not. | **Bound to the layer's Opacity**: `1 at frame 1`, `0.42 at frame 78`, `1 at frame 204` as the layer's opacity was set; the mixer's own slider (0.61, 0.13) never reached the plugin. Transition/autopilot not tested. |
+| `DeInitGL after N frames, …` | The instance's life, and the clock's final state. | Not reported from this session. |
 
 Where a line's answer changes a claim in this file, change the claim, date it,
 and say it came from the log.
@@ -692,16 +803,20 @@ and say it came from the log.
 
 ## Open questions
 
-1. **Does Resolume drive the fader?** If it binds `Opacity` to the layer's
-   transition position, the operator loses it as a manual control — which may be
-   right for a mixer and may be surprising. One session in front of Arena
-   answers it, and the answer might move the master blend back to `Mix` with a
-   separate `Opacity` beside it.
+1. ~~Does Resolume drive the fader?~~ **Yes, answered 2026-09-23** (Arena
+   7.27.1 on Windows, from the log): Resolume binds `Opacity` to the **layer's**
+   Opacity fader and overrides the mixer's own slider. The operator does not
+   lose a manual control — the layer's fader is it — so the master blend stays
+   `Opacity`. Whether the layer's transition or autopilot also moves it was not
+   tested.
 2. ~~Is `Extra Mixers` the right folder?~~ **No, answered at release:**
    Resolume has no such folder; mixers load from Extra Effects. See above.
-3. **Is a genlock usable as a transition?** Resolume's mixers are chosen per
-   layer as transitions. A genlock is not a crossfade, and what an autopilot
-   sweeping `Opacity` through it looks like is unknown.
+3. **Is a genlock usable as a transition?** Partly answered, 2026-09-23 (Arena
+   7.27.1 on Windows): a mixer is chosen as a layer's **Blend Mode**, and that
+   same list is the transition list, so SW Genlock is offered in both roles.
+   `Opacity` is bound to the layer's opacity (question 1). A genlock is not a
+   crossfade, and what a transition or autopilot does through it is still
+   unknown — not tested, and no pixels have been captured from Arena.
 4. ~~Should the crawl wrap be an operator control?~~ **Done, 2026-09-23:**
    `Crawl Wrap`, 1 to 16 pixels of the mode, default 1.
 5. ~~Should `Key Delay` scale with a chosen Amiga mode?~~ **Done, 2026-09-23:**
@@ -710,6 +825,17 @@ and say it came from the log.
 6. **NTSC.** Still PAL throughout. An NTSC Amiga's lores clock is 7.15909 MHz
    and its burst is nine cycles, so both the crawl rate and the Crawl Wrap
    ceiling would move. A second dropdown, not attempted.
+7. **Why does Arena hide Key Source?** Measured 2026-09-23 (Arena 7.27.1,
+   Windows): the mixer panel exposes 25 of 26 parameters and leaves out Key
+   Source, id 0, so in Resolume the key is always Colour 0. Not known why; one
+   guess is that Arena treats a mixer's first parameter specially, which moving
+   another parameter to index 0 would test. Not attempted in v0.1.0.
+8. **Does Resolume ever call a mixer with one input?** Not in the one sequence
+   tried (clear and refill the layer below, 2026-09-23). An empty bottom layer
+   from the start, and other patching orders, are untried.
+9. **Does it render correctly in Arena?** Not known: no pixels were captured,
+   because Arena's REST thumbnails do not serve a mixer's output. It was driven
+   every frame without error lines; nobody has looked at the picture.
 
 ---
 
