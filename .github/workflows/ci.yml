@@ -60,7 +60,7 @@ jobs:
         # At 320x180, because the runner has no GPU and the question is only
         # whether a control changed ANY subpixel. Two at a time on a
         # three-core runner; graticule learned that an eight-wide pool at
-        # 320x180 was still going at twenty minutes. Nineteen controls here
+        # 320x180 was still going at twenty minutes. Twenty-one controls here
         # against rosette's forty-four, so it should be comfortable.
         timeout-minutes: 25
         run: python3 tools/sweep.py --size 320x180 --jobs 2

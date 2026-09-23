@@ -68,11 +68,13 @@ public:
 	/// so a measurement that disagrees says WHICH of the two is wrong.
 	struct Timings
 	{
-		double elapsedSeconds  = 0.0;
-		double crawlAmigaPx    = 0.0;///< reduced into [0, kCrawlWrapAmigaPx)
-		double delayAmigaPx    = 0.0;///< Key Delay plus the crawl
-		double rollPhase       = 0.0;///< 0..1 picture heights; 0 while locked
-		bool locked            = true;
+		double elapsedSeconds   = 0.0;
+		double crawlAmigaPx     = 0.0;///< reduced into [0, crawlWrapAmigaPx)
+		double crawlWrapAmigaPx = 0.0;///< the wrap the Crawl Wrap control asked for
+		double delayAmigaPx     = 0.0;///< Key Delay plus the crawl
+		double rollPhase        = 0.0;///< 0..1 picture heights; 0 while locked
+		int amigaMode           = 0;  ///< the mode the last frame was rendered in
+		bool locked             = true;
 	};
 	Timings TimingsForTest() const
 	{
@@ -84,6 +86,37 @@ public:
 	void SetClockScaleForTest( double scale )
 	{
 		clock.SetScaleForTest( scale );
+	}
+
+	/// Deliberate mistakes, for the harness's negative controls.
+	///
+	/// A check that cannot fail is not a check. Each of these is the wrong
+	/// answer to one of the "does it scale with the mode?" questions in
+	/// Controls.h, written into the real ProcessOpenGL so that `gltest
+	/// --modes` can show its own assertion failing against it. The host can
+	/// never reach them: nothing but this setter changes `fault`, and it
+	/// starts at FAULT_NONE.
+	enum Fault : int
+	{
+		FAULT_NONE = 0,
+		FAULT_CRAWL_IN_LORES,       ///< the crawl rate ignores the mode's faster clock
+		FAULT_DELAY_IN_LORES,       ///< Key Delay counted in lores pixels in every mode
+		FAULT_TEAR_SCALES_WITH_MODE,///< the tear's throw counted in the mode's pixels
+		FAULT_WRAP_FIXED            ///< Crawl Wrap ignored: the old constant one pixel
+	};
+	void SetFaultForTest( Fault f )
+	{
+		fault = f;
+	}
+
+	/// Compile THIS fragment shader in InitGL instead of the shipped one.
+	/// Only `gltest --mutation` calls it: once with the shipped text, to show
+	/// the default path and the hook render the same bytes, and once with a
+	/// single character changed, to show a check fails. Must be called
+	/// before InitGL, and the pointer must outlive it.
+	void SetFragmentShaderForTest( const char* source )
+	{
+		fragmentOverride = source;
 	}
 
 	/// The order the host shows them in: cut the key, run the clocks, work
@@ -99,10 +132,15 @@ public:
 		PT_SOFTNESS,
 		PT_INVERT,
 
-		//Timing
+		//Timing. Amiga Mode comes FIRST in the group because it sets the unit
+		//every other control in it is stated in: one Amiga pixel is 1/320 of
+		//the picture in lores, 1/640 in hires and 1/1280 in superhires, so
+		//Key Delay and Crawl Wrap mean a different distance in each.
+		PT_AMIGA_MODE,
 		PT_KEY_DELAY,
 		PT_CLOCK_ERROR,
 		PT_CRAWL_RATE,
+		PT_CRAWL_WRAP,
 		PT_SYNC_QUALITY,
 		PT_ROLL_RATE,
 
@@ -149,6 +187,9 @@ private:
 
 	genlock::timing::Clock clock;
 	Timings lastTimings;
+	Fault fault                  = FAULT_NONE;
+	const char* fragmentOverride = nullptr;
+
 
 	float params[ PT_COUNT ] = {};
 

@@ -21,7 +21,7 @@
       float ever sees it.
 
     What the shader is handed is never a time. It is a phase already reduced
-    into its own period -- under one Amiga pixel for the crawl, under one
+    into its own period -- under Crawl Wrap for the crawl, under one
     picture height for the roll -- so the float it arrives in has its full
     precision available for the part that matters.
 */
@@ -75,9 +75,10 @@ private:
 /// it, in Amiga pixels, reduced into [0, wrapPx).
 ///
 /// Reduced in double, and from an elapsed time that is already frame-relative.
-/// `rate` can reach 350 Amiga px/s at the top of the Clock Error range, so
-/// over an eight-hour session the product is about 1e7 -- comfortably inside
-/// double's exact integers and nowhere near a float's.
+/// `rate` is at most 50 ppm of the superhires clock times a Crawl Rate of 4
+/// -- about 5700 superhires px/s -- so over an eight-hour session the product
+/// is about 1.6e8: comfortably inside double's exact integers and nowhere near
+/// a float's.
 double CrawlPhase( double elapsedSeconds, double ratePxPerSecond, double wrapPx );
 
 /// The roll phase: the overlay's vertical position, in picture heights,

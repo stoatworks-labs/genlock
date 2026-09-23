@@ -48,7 +48,11 @@ std::string glStringOrUnknown( GLenum name )
 }
 
 const char* const kKeySourceNames[] = { "Colour 0", "Luma", "Alpha" };
+const char* const kAmigaModeNames[] = { "Lores", "Hires", "Superhires" };
 const char* const kFaderNames[]     = { "Video", "Overlay", "Dissolve" };
+
+static_assert( sizeof( kAmigaModeNames ) / sizeof( kAmigaModeNames[ 0 ] ) == AM_COUNT,
+               "one name per Amiga mode" );
 
 int optionIndex( float value, int count )
 {
@@ -79,9 +83,14 @@ Genlock::Genlock()
 	params[ PT_SOFTNESS ]  = 0.06f;
 	params[ PT_INVERT ]    = 0.0f;
 
+	//Lores and a one-pixel wrap: exactly what this plugin did before either
+	//control existed, so a saved composition from then renders the same
+	//bytes. `gltest --defaults` holds both to it.
+	params[ PT_AMIGA_MODE ]   = static_cast< float >( AM_LORES );
 	params[ PT_KEY_DELAY ]    = 0.4375f;//-1 Amiga pixel: the colour-0 fringe
 	params[ PT_CLOCK_ERROR ]  = 0.30f;  //about 0.13 ppm -- one pixel per second
 	params[ PT_CRAWL_RATE ]   = 0.25f;  //unity
+	params[ PT_CRAWL_WRAP ]   = 0.0f;   //one Amiga pixel: a clean re-lock every line
 	params[ PT_SYNC_QUALITY ] = 1.0f;   //locked
 	params[ PT_ROLL_RATE ]    = 0.125f; //half a roll per second, once lock is lost
 
@@ -118,9 +127,11 @@ Genlock::Genlock()
 	SetParamInfof( PT_SOFTNESS, "Softness", FF_TYPE_STANDARD );
 	SetParamInfo( PT_INVERT, "Invert", FF_TYPE_BOOLEAN, false );
 
+	option( PT_AMIGA_MODE, "Amiga Mode", AM_COUNT, kAmigaModeNames );
 	SetParamInfof( PT_KEY_DELAY, "Key Delay", FF_TYPE_STANDARD );
 	SetParamInfof( PT_CLOCK_ERROR, "Clock Error", FF_TYPE_STANDARD );
 	SetParamInfof( PT_CRAWL_RATE, "Crawl Rate", FF_TYPE_STANDARD );
+	SetParamInfof( PT_CRAWL_WRAP, "Crawl Wrap", FF_TYPE_STANDARD );
 	SetParamInfof( PT_SYNC_QUALITY, "Sync Quality", FF_TYPE_STANDARD );
 	SetParamInfof( PT_ROLL_RATE, "Roll Rate", FF_TYPE_STANDARD );
 
@@ -140,7 +151,7 @@ Genlock::Genlock()
 	// consecutive same-group ids, so each group is one contiguous run.
 	for( FFUInt32 i = PT_KEY_SOURCE; i <= PT_INVERT; ++i )
 		SetParamGroup( i, "Key" );
-	for( FFUInt32 i = PT_KEY_DELAY; i <= PT_ROLL_RATE; ++i )
+	for( FFUInt32 i = PT_AMIGA_MODE; i <= PT_ROLL_RATE; ++i )
 		SetParamGroup( i, "Timing" );
 	for( FFUInt32 i = PT_FADER; i <= PT_DISSOLVE; ++i )
 		SetParamGroup( i, "Fader" );
@@ -170,7 +181,7 @@ FFResult Genlock::InitGL( const FFGLViewportStruct* vp )
 	            + " renderer=" + glStringOrUnknown( GL_RENDERER )
 	            + " version=" + glStringOrUnknown( GL_VERSION ) );
 
-	if( !shader.Compile( kVertexShader, kGenlockShader ) )
+	if( !shader.Compile( kVertexShader, fragmentOverride != nullptr ? fragmentOverride : kGenlockShader ) )
 	{
 		//Returning FF_FAIL here is invisible to the operator: the mixer
 		//simply does nothing in Resolume. These two lines are the only
@@ -226,9 +237,30 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	//-----------------------------------------------------------------
 	const double elapsed = clock.Tick();
 
-	const double crawlRate  = CrawlRateAmigaPxPerSecond( params[ PT_CLOCK_ERROR ], params[ PT_CRAWL_RATE ] );
-	const double crawl      = timing::CrawlPhase( elapsed, crawlRate, kCrawlWrapAmigaPx );
-	const double delayAmiga = static_cast< double >( KeyDelayFromParam( params[ PT_KEY_DELAY ] ) ) + crawl;
+	//The mode sets the unit. Every "Amiga pixel" from here to the uniforms
+	//is a pixel OF THIS MODE -- 1/320, 1/640 or 1/1280 of the line -- except
+	//the tear's throw, which Controls.h says why is always lores.
+	const int mode         = optionIndex( params[ PT_AMIGA_MODE ], AM_COUNT );
+	const double modeWidth = AmigaWidthForMode( mode );
+
+	//The crawl rate is in pixels of this mode per second, because it is this
+	//mode's pixel clock that drifts. Divided by this mode's width below, the
+	//mode cancels exactly -- see CrawlRateAmigaPxPerSecond.
+	const double crawlRate = CrawlRateAmigaPxPerSecond( params[ PT_CLOCK_ERROR ], params[ PT_CRAWL_RATE ],
+	                                                    fault == FAULT_CRAWL_IN_LORES ? AM_LORES : mode );
+	const double crawlWrap = fault == FAULT_WRAP_FIXED
+	                             ? kCrawlWrapMinAmigaPx
+	                             : static_cast< double >( CrawlWrapAmigaPxFromParam( params[ PT_CRAWL_WRAP ] ) );
+	const double crawl     = timing::CrawlPhase( elapsed, crawlRate, crawlWrap );
+
+	//Key Delay is a count of this mode's pixel clocks, so it goes in as it
+	//is and the division by this mode's width makes it half the distance in
+	//hires. The sum is taken BEFORE the division, exactly as it was before
+	//the mode existed, so lores renders the same bits it always did.
+	const double keyDelayPx = static_cast< double >( KeyDelayFromParam( params[ PT_KEY_DELAY ] ) );
+	const double delayAmiga = keyDelayPx + crawl;
+	const double keyDelayPicture = fault == FAULT_DELAY_IN_LORES ? keyDelayPx / kAmigaLoresWidth + crawl / modeWidth
+	                                                             : delayAmiga / modeWidth;
 
 	const float quality = std::clamp( params[ PT_SYNC_QUALITY ], 0.0f, 1.0f );
 	const bool locked   = quality >= kLockThreshold;
@@ -238,11 +270,13 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	//rate the operator asked for, so that it can be checked against one.
 	const float lockLoss = locked ? 0.0f : ( kLockThreshold - quality ) / kLockThreshold;
 
-	lastTimings.elapsedSeconds = elapsed;
-	lastTimings.crawlAmigaPx   = crawl;
-	lastTimings.delayAmigaPx   = delayAmiga;
-	lastTimings.rollPhase      = roll;
-	lastTimings.locked         = locked;
+	lastTimings.elapsedSeconds   = elapsed;
+	lastTimings.crawlAmigaPx     = crawl;
+	lastTimings.crawlWrapAmigaPx = crawlWrap;
+	lastTimings.delayAmigaPx     = delayAmiga;
+	lastTimings.rollPhase        = roll;
+	lastTimings.amigaMode        = mode;
+	lastTimings.locked           = locked;
 
 	//-----------------------------------------------------------------
 	// Bind both inputs.
@@ -279,12 +313,17 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	shader.Set( "Softness", SoftnessFromParam( params[ PT_SOFTNESS ] ) );
 	shader.Set( "Invert", params[ PT_INVERT ] > 0.5f ? 1.0f : 0.0f );
 
-	//Amiga pixels to a fraction of the picture width. One Amiga lores pixel
-	//is 1/320 of the active line whatever the raster is, which is what makes
-	//the fringe the same size at 720p and at 4K.
-	shader.Set( "KeyDelay", static_cast< float >( delayAmiga / kAmigaWidth ) );
+	//Amiga pixels to a fraction of the picture width. One Amiga pixel is
+	//1/320, 1/640 or 1/1280 of the active line whatever the raster is, which
+	//is what makes the fringe the same size at 720p and at 4K.
+	//
+	//The tear is thrown by a failing SYNC -- a time error -- so its throw is
+	//a distance on the picture and is stated in LORES pixels in every mode.
+	//See kTearAmigaPx.
+	const double tearWidth = fault == FAULT_TEAR_SCALES_WITH_MODE ? modeWidth : kAmigaLoresWidth;
+	shader.Set( "KeyDelay", static_cast< float >( keyDelayPicture ) );
 	shader.Set( "RollPhase", static_cast< float >( roll ) );
-	shader.Set( "TearThrow", static_cast< float >( lockLoss * kTearAmigaPx / kAmigaWidth ) );
+	shader.Set( "TearThrow", static_cast< float >( lockLoss * kTearAmigaPx / tearWidth ) );
 	shader.Set( "TearBand", kTearBand );
 
 	shader.Set( "FaderMode", static_cast< float >( optionIndex( params[ PT_FADER ], FD_COUNT ) ) );

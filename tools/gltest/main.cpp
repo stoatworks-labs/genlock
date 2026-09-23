@@ -16,6 +16,9 @@
         gltest --crawl                  the delay walks at the rate the ppm predicts
         gltest --roll                   the overlay rolls at the stated rate and wraps
         gltest --fader                  at Video the output IS Dest
+        gltest --modes                  Amiga Mode and Crawl Wrap, with negative controls
+        gltest --defaults               the new controls' defaults ARE the old behaviour
+        gltest --mutation               a one-character GLSL mutation fails a check
         gltest --bench                  ms/frame at 720p through 4K
 
     Every check renders through the REAL plugin class in a headless CGL
@@ -63,6 +66,10 @@ using namespace genlock;
 namespace
 {
 int failures = 0;
+
+/// The fragment shader the next Rig compiles instead of the shipped one.
+/// Null -- the shipped one -- except inside `--mutation`.
+const char* g_fragmentForNextRig = nullptr;
 
 void Check( bool ok, const std::string& what )
 {
@@ -208,7 +215,7 @@ Image edgeCard( int width, int height, double edgeFraction )
 {
 	Image image( static_cast< size_t >( width ) * height * 4 );
 	const double edgePx = edgeFraction * width;
-	const double ramp   = kEdgeRampAmigaPx * ( static_cast< double >( width ) / kAmigaWidth );
+	const double ramp   = kEdgeRampAmigaPx * ( static_cast< double >( width ) / kAmigaLoresWidth );
 	for( int y = 0; y < height; ++y )
 		for( int x = 0; x < width; ++x )
 		{
@@ -536,6 +543,9 @@ struct Rig
 		height   = outH;
 		destSpec = dest;
 		srcSpec  = src;
+
+		if( g_fragmentForNextRig != nullptr )
+			plugin.SetFragmentShaderForTest( g_fragmentForNextRig );
 
 		FFGLViewportStruct viewport = {};
 		viewport.width              = static_cast< FFUInt32 >( outW );
@@ -892,7 +902,25 @@ int runNames()
 		}
 	}
 	std::printf( "\n  %d over the limit\n", over );
-	return over == 0 ? 0 : 1;
+
+	//And no two alike. `--set` and the sweep find a parameter by name and
+	//take the FIRST match, so a duplicate makes the second one unreachable
+	//from every tool in this repo -- and a host that keys saved values by
+	//name would do the same to an operator's composition.
+	int duplicates = 0;
+	for( unsigned int a = 0; a < Genlock::PT_COUNT; ++a )
+		for( unsigned int b = a + 1; b < Genlock::PT_COUNT; ++b )
+		{
+			const char* na = plugin.GetParamName( a );
+			const char* nb = plugin.GetParamName( b );
+			if( na != nullptr && nb != nullptr && std::strcmp( na, nb ) == 0 )
+			{
+				std::printf( "  %u and %u are both called \"%s\"\n", a, b, na );
+				++duplicates;
+			}
+		}
+	std::printf( "  %d duplicate names\n", duplicates );
+	return over == 0 && duplicates == 0 ? 0 : 1;
 }
 
 //---------------------------------------------------------------------------
@@ -1119,7 +1147,7 @@ int runDelay()
 {
 	const int width = 640, height = 360;
 	const double edgeFraction = 0.5;
-	const double pxPerAmiga   = static_cast< double >( width ) / kAmigaWidth;//2 at this raster
+	const double pxPerAmiga   = static_cast< double >( width ) / kAmigaLoresWidth;//2 at this raster, in lores -- the default mode
 	const double edgePx       = edgeFraction * width;
 	const double rampPx       = kEdgeRampAmigaPx * pxPerAmiga;
 	const double rampStart    = edgePx - rampPx * 0.5;
@@ -1367,13 +1395,32 @@ int runDelay()
 //---------------------------------------------------------------------------
 // --crawl
 //---------------------------------------------------------------------------
+
+/// The Clock Error slider position that means `ppm`, found by inverting the
+/// plugin's own map. The checks state the physics first -- a rate in Amiga
+/// pixels per second -- and find the slider afterwards, so they are about the
+/// physics and not about the slider.
+float clockParamFor( double ppm )
+{
+	double lo = 0.0, hi = 1.0;
+	for( int i = 0; i < 60; ++i )
+	{
+		const double mid = 0.5 * ( lo + hi );
+		if( ClockErrorPpmFromParam( static_cast< float >( mid ) ) < ppm )
+			lo = mid;
+		else
+			hi = mid;
+	}
+	return static_cast< float >( 0.5 * ( lo + hi ) );
+}
+
 int runCrawl()
 {
 	//A wider raster than --delay, because the quantity under test is a
 	//FRACTION of an Amiga pixel per frame: four output texels per Amiga
 	//pixel puts the per-frame step well above the measurement tolerance.
 	const int width = 1280, height = 360;
-	const double pxPerAmiga = static_cast< double >( width ) / kAmigaWidth;//4
+	const double pxPerAmiga = static_cast< double >( width ) / kAmigaLoresWidth;//4, in lores -- the default mode
 	const double edgePx     = 0.5 * width;
 	const double rampPx     = kEdgeRampAmigaPx * pxPerAmiga;
 	const double rampStart  = edgePx - rampPx * 0.5;
@@ -1388,23 +1435,16 @@ int runCrawl()
 	//clock times fractional frequency error -- rather than from the map, so
 	//this check is about the physics and not about the slider.
 	const double wantRate = 8.0;//Amiga px/s: one wrap every 7.5 frames at 60fps
-	const double wantPpm  = wantRate / ( kAmigaPixelClockHz * 1e-6 );
+	const double wantPpm  = wantRate / ( kAmigaLoresPixelClockHz * 1e-6 );
 
-	float clockParam = 0.5f;
-	{
-		double lo = 0.0, hi = 1.0;
-		for( int i = 0; i < 60; ++i )
-		{
-			const double mid = 0.5 * ( lo + hi );
-			if( ClockErrorPpmFromParam( static_cast< float >( mid ) ) < wantPpm )
-				lo = mid;
-			else
-				hi = mid;
-		}
-		clockParam = static_cast< float >( 0.5 * ( lo + hi ) );
-	}
-	const double ppm  = ClockErrorPpmFromParam( clockParam );
-	const double rate = kAmigaPixelClockHz * ppm * 1e-6 * 1.0;//Crawl Rate at unity
+	const float clockParam = clockParamFor( wantPpm );
+	const double ppm       = ClockErrorPpmFromParam( clockParam );
+	const double rate      = kAmigaLoresPixelClockHz * ppm * 1e-6 * 1.0;//Crawl Rate at unity
+
+	//This check runs at the DEFAULT mode and the DEFAULT wrap -- lores, one
+	//Amiga pixel -- which is the behaviour the plugin had before either
+	//control existed. `--modes` is where the other settings are measured.
+	const double kCrawlWrapAmigaPx = kCrawlWrapMinAmigaPx;
 
 	std::printf( "the key delay walks at the rate the clock error predicts\n\n" );
 	std::printf( "  Clock Error %.6f (%.6f ppm), Crawl Rate unity\n", clockParam, ppm );
@@ -1419,6 +1459,8 @@ int runCrawl()
 	rig.Set( "Key Delay", delayParam( baseDelay ) );
 	rig.Set( "Clock Error", clockParam );
 	rig.Set( "Crawl Rate", 0.25f );//unity
+	//Amiga Mode and Crawl Wrap are left at their defaults ON PURPOSE, and
+	//the first rendered frame says what they came to.
 
 	//Derived from the raster and the card, like --delay's. The key edge
 	//travels between baseDelay and baseDelay + one Amiga pixel, so the
@@ -1495,6 +1537,9 @@ int runCrawl()
 		previous = got;
 	}
 
+	const Genlock::Timings last = rig.plugin.TimingsForTest();
+	Check( last.amigaMode == AM_LORES && last.crawlWrapAmigaPx == kCrawlWrapAmigaPx,
+	       fmt( "at the defaults the plugin crawls in lores with a %.6f Amiga px wrap", last.crawlWrapAmigaPx ) );
 	Check( worstPhase < 1e-9,
 	       fmt( "the reduced phase matches the closed form to %.3e Amiga px over ", worstPhase )
 	           + fmt( "%.0f frames", measured ) );
@@ -1833,6 +1878,867 @@ int runFader()
 }
 
 //---------------------------------------------------------------------------
+// --modes
+//
+// Amiga Mode changes the unit, and Controls.h says for each quantity whether
+// it scales with the mode or not. These checks hold the plugin to that, at
+// two rasters, and each one is run a second time against a plugin with the
+// WRONG answer built in (Genlock::Fault) to show that it fails.
+//
+//   crawl speed     the same distance per second across the picture in every
+//                   mode -- bit-identical, not merely close
+//   Key Delay       a count of the mode's pixel clocks: half the distance in
+//                   hires, a quarter in superhires
+//   tear throw      a time error, stated in lores pixels: the same in every
+//                   mode
+//   Crawl Wrap      the crawl wraps where the control says, in pixels of the
+//                   mode
+//---------------------------------------------------------------------------
+
+/// What one run of a check came to: whether every claim held, and if not
+/// the first that did not -- which is what a negative control reports.
+struct Outcome
+{
+	bool pass = true;
+	std::string firstFailure;
+	bool pictureFailed = false;///< a claim measured OUT OF THE PICTURE failed
+	std::string firstPictureFailure;
+};
+
+/// Marks a claim as measured from the rendered pixels, rather than from
+/// the plugin's own report of what it did or from arithmetic.
+constexpr bool kFromPicture = true;
+
+/// A claim that is reported as a Check when `report` is set and only
+/// recorded when it is not. The negative controls run the SAME claims
+/// silently against a broken plugin and then make one Check of their own:
+/// that something failed.
+struct Claims
+{
+	bool report = true;
+	Outcome outcome;
+
+	void operator()( bool ok, const std::string& what, bool fromPicture = false )
+	{
+		if( report )
+			Check( ok, what );
+		if( !ok && outcome.pass )
+		{
+			outcome.pass         = false;
+			outcome.firstFailure = what;
+		}
+		if( !ok && fromPicture && !outcome.pictureFailed )
+		{
+			outcome.pictureFailed       = true;
+			outcome.firstPictureFailure = what;
+		}
+	}
+};
+
+/// The negative control's own Check: the claims above FAILED against a
+/// plugin with `fault` built in -- and specifically one measured out of the
+/// PICTURE. A fault caught only by the plugin's report of its own phases
+/// would show the plumbing is checked, not that the pixels are.
+void expectFailure( const Outcome& outcome, const std::string& fault )
+{
+	Check( outcome.pictureFailed, "negative control, " + fault + ": the check FAILS in the picture"
+	                                  + ( outcome.pictureFailed ? " (" + outcome.firstPictureFailure + ")"
+	                                                            : std::string( " -- it did not, so it cannot tell" ) ) );
+}
+
+/// The key, recovered over a card whose fill is NOT flat.
+///
+/// keyAcrossRow assumes the fill is colour 0 everywhere it looks, which holds
+/// only to the left of the card's own edge -- so --delay and --crawl keep
+/// the key's delay negative. A crawl from a zero delay walks the key RIGHT,
+/// into the ramp and the fill. The output is still `mix( fill, video, k )`
+/// and the fill is still the card at this very column -- the fill fetch is
+/// not displaced while locked, and at matched rasters it lands on texel
+/// centres -- so the inversion holds column by column with the card's own
+/// value in place of a constant. Read off BLUE, where the video is 0 and the
+/// card is 170 at its darkest: the same 170 codes of contrast the flat-fill
+/// version had, so the same error bound.
+std::vector< double > keyOverCard( const Image& out, const Image& card, int width, int row )
+{
+	std::vector< double > key( static_cast< size_t >( width ) );
+	for( int x = 0; x < width; ++x )
+	{
+		const size_t at    = ( static_cast< size_t >( row ) * width + x ) * 4 + 2;
+		const double fill  = card[ at ];
+		const double video = kVideo.b;
+		key[ static_cast< size_t >( x ) ] = ( static_cast< double >( out[ at ] ) - fill ) / ( video - fill );
+	}
+	return key;
+}
+
+/// The FILL's edge, with the key off: 1 where the card is colour 0, 0 where
+/// it is white, read off blue (170 to 255: 85 codes of contrast).
+std::vector< double > fillProfile( const Image& out, int width, int row )
+{
+	std::vector< double > v( static_cast< size_t >( width ) );
+	for( int x = 0; x < width; ++x )
+	{
+		const size_t at = ( static_cast< size_t >( row ) * width + x ) * 4 + 2;
+		v[ static_cast< size_t >( x ) ] = ( 255.0 - out[ at ] ) / ( 255.0 - kColour0.b );
+	}
+	return v;
+}
+
+/// The error bound for an edge found by integration, derived as --delay
+/// derives it: half a code of each partially covered column, over `contrast`
+/// codes, across the ramp; plus GL's eight bits of subtexel precision; twice,
+/// because two edges are differenced.
+double integralErrorBound( double rampPx, double contrast )
+{
+	return 2.0 * ( rampPx * ( 0.5 / contrast ) + 1.0 / 256.0 );
+}
+
+/// The same 0.25 output texels as --delay's fractional case, for the same
+/// reasons: a factor of three over the derived bound (asserted, per raster),
+/// and half the 0.5-texel error of a plugin that rounded to whole texels.
+constexpr double kEdgeTolerance = 0.25;
+
+struct ModeSettings
+{
+	int mode            = AM_LORES;
+	float keyDelay      = 0.5f;//zero
+	float clockError    = 0.3f;
+	float crawlRate     = 0.0f;
+	float crawlWrap     = 0.0f;
+	float syncQuality   = 1.0f;
+	bool keyOff         = false;
+	Genlock::Fault fault = Genlock::FAULT_NONE;
+};
+
+struct ModeRun
+{
+	bool ok = true;
+	std::vector< Image > frames;
+	std::vector< Genlock::Timings > timings;
+};
+
+/// Frames 0..count-1 of the edge card through ONE rig with these settings.
+///
+/// One rig per check, not per mode: every mode is rendered by the same
+/// program object on the same textures, so where two modes hand the shader
+/// the same uniform bits, "the same bytes" rests on nothing but GL's
+/// repeatability rule -- the same program, state and inputs give the same
+/// result -- which every conforming implementation owes. The clock's epoch
+/// is the first frame this rig ever rendered, t = 0, so frame f is t = f/60
+/// however many times the frames are rendered again.
+ModeRun renderModes( Rig& rig, const ModeSettings& s, int count, double fps = 60.0 )
+{
+	ModeRun run;
+	setUpTimingRig( rig, rig.width, rig.height, 0.5 );
+	if( s.keyOff )
+		keyOffEverywhere( rig );
+	rig.plugin.SetFaultForTest( s.fault );
+	rig.Set( "Amiga Mode", static_cast< float >( s.mode ) );
+	rig.Set( "Key Delay", s.keyDelay );
+	rig.Set( "Clock Error", s.clockError );
+	rig.Set( "Crawl Rate", s.crawlRate );
+	rig.Set( "Crawl Wrap", s.crawlWrap );
+	rig.Set( "Sync Quality", s.syncQuality );
+	for( int frame = 0; frame < count; ++frame )
+	{
+		if( !rig.Render( frame, fps ) )
+		{
+			run.ok = false;
+			return run;
+		}
+		run.frames.push_back( rig.Pixels() );
+		run.timings.push_back( rig.plugin.TimingsForTest() );
+	}
+	rig.plugin.SetFaultForTest( Genlock::FAULT_NONE );
+	return run;
+}
+
+const char* const kModeNames[ AM_COUNT ] = { "lores", "hires", "superhires" };
+
+//---------------------------------------------------------------------------
+// The crawl's speed across the picture, in all three modes.
+//---------------------------------------------------------------------------
+Outcome crawlAcrossModes( int width, int height, Genlock::Fault fault, bool report )
+{
+	Claims claim { report, {} };
+	const double fps        = 60.0;
+	const int frames        = 24;
+	const double pxPerLores = width / kAmigaLoresWidth;
+	const double edgePx     = 0.5 * width;
+	const double rampPx     = kEdgeRampAmigaPx * pxPerLores;
+
+	//Stated in LORES pixels per second, the physics; the slider is found
+	//afterwards. Hires and superhires get the same Clock Error, and so a
+	//crawl of 16 and 32 of THEIR pixels per second.
+	const double wantLores = 8.0;
+	const float clockParam = clockParamFor( wantLores / ( kAmigaLoresPixelClockHz * 1e-6 ) );
+	const double loresRate = kAmigaLoresPixelClockHz * ClockErrorPpmFromParam( clockParam ) * 1e-6;
+	const float wrapParam  = 1.0f;//16 pixels of the mode, the widest
+
+	//The claim is about SPEED, so no mode may wrap inside the run: at the
+	//last frame superhires has walked four times as many of its own pixels
+	//as lores has of its.
+	const double lastT = ( frames - 1 ) / fps;
+	claim( 4.0 * loresRate * lastT < CrawlWrapAmigaPxFromParam( wrapParam ),
+	       fmt( "no mode wraps inside the run (superhires reaches %.3f of its 16-pixel wrap)", 4.0 * loresRate * lastT ) );
+
+	const double maxTravel = loresRate * lastT * pxPerLores;
+	const int lo           = static_cast< int >( std::floor( edgePx - rampPx * 0.5 ) ) - 3;
+	const int hi           = static_cast< int >( std::ceil( edgePx + rampPx * 0.5 + maxTravel ) ) + 3;
+	const double bound     = integralErrorBound( rampPx, std::fabs( static_cast< double >( kVideo.b ) - kColour0.b ) );
+	claim( bound * 3.0 <= kEdgeTolerance,
+	       fmt( "the derived error bound is %.4f texels, three times inside %.2f", bound, kEdgeTolerance ) );
+
+	Rig rig;
+	if( !rig.Init( width, height ) )
+	{
+		claim( false, "the rig initialises" );
+		return claim.outcome;
+	}
+	const Image card = edgeCard( width, height, 0.5 );
+	const int row    = height / 2;
+
+	ModeRun runs[ AM_COUNT ];
+	for( int m = 0; m < AM_COUNT; ++m )
+	{
+		ModeSettings s;
+		s.mode       = m;
+		s.clockError = clockParam;
+		s.crawlRate  = 0.25f;//unity
+		s.crawlWrap  = wrapParam;
+		s.fault      = fault;
+		runs[ m ]    = renderModes( rig, s, frames, fps );
+		if( !runs[ m ].ok )
+		{
+			claim( false, std::string( kModeNames[ m ] ) + ": ProcessOpenGL failed" );
+			return claim.outcome;
+		}
+	}
+
+	//1. The plugin's own reduction, as a fraction of the picture, is the
+	//   SAME BITS in every mode. Division by the mode's width undoes the
+	//   mode's clock exactly because both are the lores value times the same
+	//   power of two.
+	int bitMismatches = 0;
+	for( int m = 1; m < AM_COUNT; ++m )
+		for( int f = 0; f < frames; ++f )
+			if( runs[ m ].timings[ f ].crawlAmigaPx / AmigaWidthForMode( m )
+			    != runs[ 0 ].timings[ f ].crawlAmigaPx / AmigaWidthForMode( AM_LORES ) )
+				++bitMismatches;
+	claim( bitMismatches == 0,
+	       fmt( "the crawl as a fraction of the picture is bit-identical in all three modes (%.0f of %.0f frames differ)",
+	            bitMismatches, 2.0 * frames ) );
+
+	//2. So the PICTURES are the same bytes. Same uniforms, same program --
+	//   see renderModes.
+	int frameMismatches = 0;
+	for( int m = 1; m < AM_COUNT; ++m )
+		for( int f = 0; f < frames; ++f )
+			if( maxByteDifference( runs[ m ].frames[ f ], runs[ 0 ].frames[ f ] ) != 0 )
+				++frameMismatches;
+	claim( frameMismatches == 0,
+	       fmt( "hires and superhires render the same bytes as lores, frame for frame (%.0f of %.0f differ)",
+	            frameMismatches, 2.0 * frames ),
+	       kFromPicture );
+
+	//3. Measured out of the picture, in each mode, against the physics in
+	//   lores pixels -- not against the other modes, which would pass a
+	//   plugin that was wrong the same way in all three.
+	for( int m = 0; m < AM_COUNT; ++m )
+	{
+		double worst = 0.0, first = 0.0;
+		bool inside  = true;
+		for( int f = 0; f < frames; ++f )
+		{
+			const double edge = edgeByIntegral( keyOverCard( runs[ m ].frames[ f ], card, width, row ), lo, hi );
+			if( edge < 0.0 )
+			{
+				inside = false;
+				break;
+			}
+			if( f == 0 )
+				first = edge;
+			else
+				worst = std::max( worst, std::fabs( ( edge - first ) - loresRate * ( f / fps ) * pxPerLores ) );
+		}
+		claim( inside && worst <= kEdgeTolerance,
+		       std::string( kModeNames[ m ] )
+		           + ( inside ? fmt( ": the key walks %.4f lores px/s across the picture, worst %.4f texels off", loresRate, worst )
+		                          + fmt( " (tolerance %.2f)", kEdgeTolerance )
+		                      : std::string( ": the key edge left the measurement window" ) ),
+		       kFromPicture );
+	}
+	return claim.outcome;
+}
+
+//---------------------------------------------------------------------------
+// Key Delay is a count of the mode's pixel clocks.
+//---------------------------------------------------------------------------
+Outcome keyDelayAcrossModes( int width, int height, Genlock::Fault fault, bool report )
+{
+	Claims claim { report, {} };
+	const double pxPerLores = width / kAmigaLoresWidth;
+	const double edgePx     = 0.5 * width;
+	const double rampPx     = kEdgeRampAmigaPx * pxPerLores;
+	const double delayPx    = -8.0;//of the mode: the end of the control's range
+
+	const int lo       = static_cast< int >( std::floor( edgePx - rampPx * 0.5 + delayPx * pxPerLores ) ) - 3;
+	const int hi       = static_cast< int >( std::ceil( edgePx + rampPx * 0.5 ) ) + 3;
+	const double bound = integralErrorBound( rampPx, std::fabs( static_cast< double >( kVideo.b ) - kColour0.b ) );
+	claim( bound * 3.0 <= kEdgeTolerance,
+	       fmt( "the derived error bound is %.4f texels, three times inside %.2f", bound, kEdgeTolerance ) );
+
+	Rig rig;
+	if( !rig.Init( width, height ) )
+	{
+		claim( false, "the rig initialises" );
+		return claim.outcome;
+	}
+	const Image card = edgeCard( width, height, 0.5 );
+	const int row    = height / 2;
+
+	auto render = [ & ]( int mode, float keyDelay, Genlock::Fault f ) {
+		ModeSettings s;
+		s.mode     = mode;
+		s.keyDelay = keyDelay;
+		s.fault    = f;
+		ModeRun run = renderModes( rig, s, 1 );
+		return run.ok ? run.frames[ 0 ] : Image();
+	};
+
+	Image atDelay[ AM_COUNT ];
+	for( int m = 0; m < AM_COUNT; ++m )
+	{
+		const Image zero = render( m, delayParam( 0.0 ), fault );
+		atDelay[ m ]     = render( m, delayParam( delayPx ), fault );
+		if( zero.empty() || atDelay[ m ].empty() )
+		{
+			claim( false, "ProcessOpenGL failed" );
+			return claim.outcome;
+		}
+
+		//The prediction is -8 of THIS mode's pixels, i.e. -8/320, -8/640 or
+		//-8/1280 of the picture. At both rasters this runs at, each is a
+		//whole number of output texels, and that is asserted rather than
+		//assumed.
+		const double want = delayPx * width / AmigaWidthForMode( m );
+		claim( std::fabs( want - std::lround( want ) ) < 1e-9,
+		       std::string( kModeNames[ m ] ) + fmt( ": -8 of its pixels is %.4f output texels, a whole number", want ) );
+
+		const double e0 = edgeByIntegral( keyOverCard( zero, card, width, row ), lo, hi );
+		const double e1 = edgeByIntegral( keyOverCard( atDelay[ m ], card, width, row ), lo, hi );
+		const double got = e1 - e0;
+		const bool found = e0 >= 0.0 && e1 >= 0.0;
+		claim( found && std::fabs( got - want ) <= kEdgeTolerance,
+		       std::string( kModeNames[ m ] )
+		           + ( found ? fmt( ": Key Delay -8 moves the key %.4f texels, predicted %.4f", got, want )
+		                           + fmt( " (%.3f lores px)", got / pxPerLores )
+		                     : std::string( ": the key edge left the measurement window" ) ),
+		       kFromPicture );
+	}
+
+	//And EXACTLY: -8 hires pixels is -4 lores pixels, and -8 superhires is
+	//-2, to the bit -- (-8)/640 and (-4)/320 are the same real quotient and
+	//IEEE division rounds it the same way -- so the pictures are the same
+	//bytes. Checked on the CPU first, so a failure below means the plugin
+	//and not the arithmetic.
+	const float hiresUniform = static_cast< float >( -8.0 / AmigaWidthForMode( AM_HIRES ) );
+	const float superUniform = static_cast< float >( -8.0 / AmigaWidthForMode( AM_SUPERHIRES ) );
+	claim( hiresUniform == static_cast< float >( -4.0 / kAmigaLoresWidth )
+	           && superUniform == static_cast< float >( -2.0 / kAmigaLoresWidth ),
+	       "-8/640 is -4/320 and -8/1280 is -2/320, to the bit" );
+	const Image lores4 = render( AM_LORES, delayParam( -4.0 ), Genlock::FAULT_NONE );
+	const Image lores2 = render( AM_LORES, delayParam( -2.0 ), Genlock::FAULT_NONE );
+	claim( !lores4.empty() && maxByteDifference( atDelay[ AM_HIRES ], lores4 ) == 0,
+	       fmt( "hires at -8 is lores at -4, byte for byte (worst %.0f)", maxByteDifference( atDelay[ AM_HIRES ], lores4 ) ),
+	       kFromPicture );
+	claim( !lores2.empty() && maxByteDifference( atDelay[ AM_SUPERHIRES ], lores2 ) == 0,
+	       fmt( "superhires at -8 is lores at -2, byte for byte (worst %.0f)",
+	            maxByteDifference( atDelay[ AM_SUPERHIRES ], lores2 ) ),
+	       kFromPicture );
+	return claim.outcome;
+}
+
+//---------------------------------------------------------------------------
+// The tear's throw is the same distance in every mode.
+//---------------------------------------------------------------------------
+Outcome tearAcrossModes( int width, int height, Genlock::Fault fault, bool report )
+{
+	Claims claim { report, {} };
+	const double pxPerLores = width / kAmigaLoresWidth;
+	const double edgePx     = 0.5 * width;
+	const double rampPx     = kEdgeRampAmigaPx * pxPerLores;
+	const float quality     = 0.2f;
+
+	//The throw, computed as the plugin computes it, in float, so the
+	//prediction carries the same rounding: a fraction of the picture.
+	const float lockLoss  = ( kLockThreshold - quality ) / kLockThreshold;
+	const double throwPic = static_cast< float >( lockLoss * kTearAmigaPx / kAmigaLoresWidth );
+
+	//How hard a row leans, from the shader's own definition: 1 at the seam,
+	//falling to 0 at kTearBand from it. At frame 0 the roll phase is exactly
+	//0, so the seam is at the bottom (and, wrapping, the top) of the picture.
+	const auto lean = [ & ]( int row ) {
+		const double v    = ( row + 0.5 ) / height;
+		const double seam = std::min( v, 1.0 - v );
+		return std::max( 0.0, 1.0 - seam / kTearBand );
+	};
+
+	const double maxShift = throwPic * width;
+	const int lo          = static_cast< int >( std::floor( edgePx - rampPx * 0.5 - maxShift ) ) - 3;
+	const int hi          = static_cast< int >( std::ceil( edgePx + rampPx * 0.5 ) ) + 3;
+	const double bound    = integralErrorBound( rampPx, 255.0 - kColour0.b );
+	claim( bound * 3.0 <= kEdgeTolerance,
+	       fmt( "the derived error bound is %.4f texels, three times inside %.2f", bound, kEdgeTolerance ) );
+
+	Rig rig;
+	if( !rig.Init( width, height ) )
+	{
+		claim( false, "the rig initialises" );
+		return claim.outcome;
+	}
+
+	Image frame[ AM_COUNT ];
+	for( int m = 0; m < AM_COUNT; ++m )
+	{
+		ModeSettings s;
+		s.mode        = m;
+		s.keyOff      = true;//the FILL's edge: what the tear throws is the overlay
+		s.syncQuality = quality;
+		s.fault       = fault;
+		ModeRun run   = renderModes( rig, s, 1 );
+		if( !run.ok )
+		{
+			claim( false, "ProcessOpenGL failed" );
+			return claim.outcome;
+		}
+		frame[ m ] = run.frames[ 0 ];
+		claim( !run.timings[ 0 ].locked && run.timings[ 0 ].rollPhase == 0.0,
+		       std::string( kModeNames[ m ] ) + ": unlocked, at roll phase exactly 0" );
+
+		//Rows at the seam against the middle row, which leans not at all.
+		const int middle  = height / 2;
+		const double base = edgeByIntegral( fillProfile( frame[ m ], width, middle ), lo, hi );
+		for( int row : { 0, height - 1 } )
+		{
+			const double want = -throwPic * lean( row ) * width;
+			const double edge = edgeByIntegral( fillProfile( frame[ m ], width, row ), lo, hi );
+			const double got  = edge - base;
+			const bool found = base >= 0.0 && edge >= 0.0;
+			claim( found && std::fabs( got - want ) <= kEdgeTolerance,
+			       std::string( kModeNames[ m ] )
+			           + ( found ? fmt( ": row %.0f is thrown %.4f texels, predicted %.4f", row, got, want )
+			                           + fmt( " (%.3f lores px)", got / pxPerLores )
+			                     : fmt( ": row %.0f left the measurement window", row ) ),
+			       kFromPicture );
+		}
+	}
+
+	//Nothing mode-dependent reaches the shader here -- Key Delay is zero and
+	//the crawl is stopped -- so if the throw is mode-independent the three
+	//pictures are the same bytes.
+	claim( maxByteDifference( frame[ AM_HIRES ], frame[ AM_LORES ] ) == 0
+	           && maxByteDifference( frame[ AM_SUPERHIRES ], frame[ AM_LORES ] ) == 0,
+	       fmt( "the torn frame is the same bytes in all three modes (worst %.0f)",
+	            std::max( maxByteDifference( frame[ AM_HIRES ], frame[ AM_LORES ] ),
+	                      maxByteDifference( frame[ AM_SUPERHIRES ], frame[ AM_LORES ] ) ) ),
+	       kFromPicture );
+	return claim.outcome;
+}
+
+//---------------------------------------------------------------------------
+// The crawl wraps at the Crawl Wrap setting, in pixels of the mode.
+//---------------------------------------------------------------------------
+Outcome wrapAtSetting( int width, int height, int mode, Genlock::Fault fault, bool report )
+{
+	Claims claim { report, {} };
+	const double fps       = 60.0;
+	const int frames       = 60;
+	const double pxPerMode = width / AmigaWidthForMode( mode );
+	const double edgePx    = 0.5 * width;
+	const double rampPx    = kEdgeRampAmigaPx * width / kAmigaLoresWidth;
+	const double wantWrap  = 4.0;//pixels of the mode
+	const std::string tag  = kModeNames[ mode ];
+
+	//14 lores pixels a second of clock error, so 28 hires ones: a wrap every
+	//17 frames in lores and every 8.6 in hires -- never on a frame, so no
+	//count depends on which side of a boundary a rounding falls.
+	const float clockParam = clockParamFor( 14.0 / ( kAmigaLoresPixelClockHz * 1e-6 ) );
+	const float wrapParam  = CrawlWrapParamFor( wantWrap );
+	const double rate      = AmigaPixelClockHzForMode( mode ) * ClockErrorPpmFromParam( clockParam ) * 1e-6;
+
+	const int lo       = static_cast< int >( std::floor( edgePx - rampPx * 0.5 ) ) - 3;
+	const int hi       = static_cast< int >( std::ceil( edgePx + rampPx * 0.5 + wantWrap * pxPerMode ) ) + 3;
+	const double bound = integralErrorBound( rampPx, std::fabs( static_cast< double >( kVideo.b ) - kColour0.b ) );
+	claim( bound * 3.0 <= kEdgeTolerance,
+	       fmt( "the derived error bound is %.4f texels, three times inside %.2f", bound, kEdgeTolerance ) );
+	//One period of travel has to be worth measuring at this raster: at
+	//least eight tolerances. 4 hires pixels at 320 wide is exactly 2 texels,
+	//which is exactly eight.
+	claim( wantWrap * pxPerMode >= 8.0 * kEdgeTolerance,
+	       tag + fmt( ": one period is %.2f output texels, at least 8x the tolerance", wantWrap * pxPerMode ) );
+
+	Rig rig;
+	if( !rig.Init( width, height ) )
+	{
+		claim( false, "the rig initialises" );
+		return claim.outcome;
+	}
+	ModeSettings s;
+	s.mode       = mode;
+	s.clockError = clockParam;
+	s.crawlRate  = 0.25f;
+	s.crawlWrap  = wrapParam;
+	s.fault      = fault;
+	const ModeRun run = renderModes( rig, s, frames, fps );
+	if( !run.ok )
+	{
+		claim( false, "ProcessOpenGL failed" );
+		return claim.outcome;
+	}
+
+	//The control's value, as the plugin reports using it: 4 of this mode's
+	//pixels, to a float's precision (the slider is a float).
+	const double wrap = CrawlWrapAmigaPxFromParam( wrapParam );
+	claim( std::fabs( wrap - wantWrap ) < 1e-6 && run.timings.back().crawlWrapAmigaPx == wrap,
+	       tag + fmt( ": the plugin wraps at %.6f of its pixels, the control asks for %.6f", run.timings.back().crawlWrapAmigaPx,
+	                  wrap ) );
+
+	const Image card = edgeCard( width, height, 0.5 );
+	const int row    = height / 2;
+	double worstPhase = 0.0, worstPixels = 0.0, first = 0.0, previous = -1.0, furthest = 0.0;
+	int wraps   = 0;
+	bool inside = true;
+	for( int f = 0; f < frames; ++f )
+	{
+		const double want = timing::PositiveMod( rate * ( f / fps ), wrap );
+		worstPhase        = std::max( worstPhase, std::fabs( run.timings[ f ].crawlAmigaPx - want ) );
+
+		const double edge = edgeByIntegral( keyOverCard( run.frames[ f ], card, width, row ), lo, hi );
+		if( edge < 0.0 )
+		{
+			inside = false;
+			break;
+		}
+		if( f == 0 )
+			first = edge;
+		worstPixels = std::max( worstPixels, std::fabs( ( edge - first ) - want * pxPerMode ) );
+		furthest    = std::max( furthest, edge - first );
+		//A wrap is a jump back of more than half a period, in texels of
+		//THIS raster and this mode.
+		if( previous >= 0.0 && edge < previous - wrap * pxPerMode * 0.5 )
+			++wraps;
+		previous = edge;
+	}
+	claim( inside, tag + ": the key edge stays inside the measurement window", kFromPicture );
+
+	claim( worstPhase < 1e-9, tag + fmt( ": the reduced phase is the closed form mod %.1f, to %.3e px", wrap, worstPhase ) );
+	claim( worstPixels <= kEdgeTolerance,
+	       tag + fmt( ": the key edge is where that phase says, worst %.4f texels (tolerance %.2f)", worstPixels,
+	                  kEdgeTolerance ),
+	       kFromPicture );
+
+	const int wantWraps = static_cast< int >( std::floor( rate * ( frames - 1 ) / fps / wrap ) );
+	claim( wraps == wantWraps,
+	       tag + fmt( ": %.0f wraps in %.0f frames, predicted %.0f", wraps, frames, wantWraps ), kFromPicture );
+
+	//And the reach, which is what the control is FOR: the fringe gets within
+	//one frame's travel of the wrap before it snaps back, and never past it.
+	//The default one-pixel wrap would stop at a quarter of this.
+	const double reach = wrap * pxPerMode, step = rate / fps * pxPerMode;
+	claim( furthest >= reach - step - kEdgeTolerance && furthest <= reach + kEdgeTolerance,
+	       tag + fmt( ": the key walks %.3f texels before it snaps, the wrap is %.3f", furthest, reach )
+	           + fmt( " (one frame is %.3f)", step ),
+	       kFromPicture );
+	return claim.outcome;
+}
+
+int runModes()
+{
+	std::printf( "Amiga Mode: what scales with the mode, and what does not\n" );
+
+	//The arithmetic first, with no GPU in it: the crawl's speed across the
+	//picture is the same BITS in every mode, over the whole range of both
+	//controls that set it.
+	{
+		int mismatches = 0, tried = 0;
+		for( float clock : { 0.0f, 0.3f, 0.555f, 0.8f, 1.0f } )
+			for( float crawl : { 0.1f, 0.25f, 0.7f, 1.0f } )
+				for( int m = 1; m < AM_COUNT; ++m )
+				{
+					++tried;
+					if( CrawlRateAmigaPxPerSecond( clock, crawl, m ) / AmigaWidthForMode( m )
+					    != CrawlRateAmigaPxPerSecond( clock, crawl, AM_LORES ) / AmigaWidthForMode( AM_LORES ) )
+						++mismatches;
+				}
+		std::printf( "\n  arithmetic\n" );
+		Check( mismatches == 0,
+		       fmt( "rate / width is bit-identical across modes for %.0f settings (%.0f differ)", tried, mismatches ) );
+		Check( AmigaWidthForMode( AM_HIRES ) == 640.0 && AmigaWidthForMode( AM_SUPERHIRES ) == 1280.0
+		           && AmigaPixelClockHzForMode( AM_HIRES ) == 2.0 * kAmigaLoresPixelClockHz
+		           && AmigaPixelClockHzForMode( AM_SUPERHIRES ) == 4.0 * kAmigaLoresPixelClockHz,
+		       "hires and superhires are 640 and 1280 across, at twice and four times the lores clock" );
+		Check( AmigaWidthForMode( -1 ) == kAmigaLoresWidth && AmigaWidthForMode( 7 ) == kAmigaLoresWidth * 4.0,
+		       "an out-of-range mode is clamped, not read past the table" );
+	}
+
+	//Two rasters: the one these were developed at, and the one CI renders
+	//at. Every window, tolerance and prediction below is computed from the
+	//raster, so each is a statement about 320x180 in its own right.
+	const int rasters[ 2 ][ 2 ] = { { 640, 360 }, { 320, 180 } };
+	for( const auto& r : rasters )
+	{
+		const int w = r[ 0 ], h = r[ 1 ];
+		std::printf( "\n  %dx%d: one lores pixel is %.2f output texels\n", w, h, w / kAmigaLoresWidth );
+
+		std::printf( "\n   the crawl's speed across the picture\n" );
+		crawlAcrossModes( w, h, Genlock::FAULT_NONE, true );
+		expectFailure( crawlAcrossModes( w, h, Genlock::FAULT_CRAWL_IN_LORES, false ),
+		               "the crawl rate ignoring the mode's faster clock" );
+
+		std::printf( "\n   Key Delay counts the mode's pixel clocks\n" );
+		keyDelayAcrossModes( w, h, Genlock::FAULT_NONE, true );
+		expectFailure( keyDelayAcrossModes( w, h, Genlock::FAULT_DELAY_IN_LORES, false ),
+		               "Key Delay counted in lores pixels in every mode" );
+
+		std::printf( "\n   the tear throws the same distance in every mode\n" );
+		tearAcrossModes( w, h, Genlock::FAULT_NONE, true );
+		expectFailure( tearAcrossModes( w, h, Genlock::FAULT_TEAR_SCALES_WITH_MODE, false ),
+		               "the tear's throw counted in the mode's pixels" );
+
+		std::printf( "\n   the crawl wraps at Crawl Wrap\n" );
+		for( int m : { AM_LORES, AM_HIRES } )
+		{
+			wrapAtSetting( w, h, m, Genlock::FAULT_NONE, true );
+			expectFailure( wrapAtSetting( w, h, m, Genlock::FAULT_WRAP_FIXED, false ),
+			               std::string( kModeNames[ m ] ) + ", Crawl Wrap ignored (the old fixed one pixel)" );
+		}
+	}
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
+// --defaults
+//
+// Two controls were added in front of a plugin that already had a
+// behaviour. At their defaults they must BE that behaviour, not resemble it.
+//---------------------------------------------------------------------------
+
+/// The crawl and the delay as the plugin computed them before Amiga Mode
+/// and Crawl Wrap existed (cf17b14): the lores clock, 7093790 Hz, written
+/// out as the literal it was; a wrap of exactly one pixel; the operator's
+/// delay added before anything else. Deliberately NOT built from the new
+/// functions -- this is the old formula, restated as it was.
+void oldCrawl( float clockParam, float crawlParam, float delayParam_, double t, double& crawl, double& delay )
+{
+	const double ppm  = static_cast< double >( ClockErrorPpmFromParam( clockParam ) );
+	const double rate = 7093790.0 * ppm * 1e-6 * static_cast< double >( CrawlRateFromParam( crawlParam ) );
+	crawl             = timing::PositiveMod( rate * t, 1.0 );
+	delay             = static_cast< double >( KeyDelayFromParam( delayParam_ ) ) + crawl;
+}
+
+/// Frames against the old formula. Returns how many frames did NOT match
+/// it bit for bit.
+int framesOffOldFormula( const std::vector< std::pair< std::string, float > >& settings, float clockParam )
+{
+	Rig rig;
+	if( !rig.Init( 320, 180 ) )
+		return -1;
+	rig.UploadDest( videoCard( 320, 180 ) );
+	rig.UploadSrc( amigaCard( 320, 180 ) );
+	rig.Set( "Clock Error", clockParam );
+	for( const auto& s : settings )
+		rig.Set( s.first, s.second );
+
+	const float crawlParam = rig.plugin.GetFloatParameter( Genlock::PT_CRAWL_RATE );
+	const float delayP     = rig.plugin.GetFloatParameter( Genlock::PT_KEY_DELAY );
+	int off                = 0;
+	for( int frame = 0; frame < 60; ++frame )
+	{
+		if( !rig.Render( frame ) )
+			return -1;
+		double crawl = 0.0, delay = 0.0;
+		oldCrawl( clockParam, crawlParam, delayP, frame / 60.0, crawl, delay );
+		const Genlock::Timings t = rig.plugin.TimingsForTest();
+		if( t.crawlAmigaPx != crawl || t.delayAmigaPx != delay )
+			++off;
+	}
+	return off;
+}
+
+int runDefaults()
+{
+	std::printf( "the new controls' defaults ARE the old behaviour\n\n" );
+	Genlock plugin;
+
+	//The shape of the parameter list. Two parameters were inserted in front
+	//of the About block, which must still close it.
+	Check( Genlock::PT_COUNT == 25,
+	       fmt( "%.0f parameters: 21 controls and the 4-entry About block", static_cast< double >( Genlock::PT_COUNT ) ) );
+	Check( Genlock::PT_ABOUT_FIRST == 21 && std::strcmp( plugin.GetParamName( Genlock::PT_ABOUT_FIRST ), "About" ) == 0,
+	       "the About block starts at 21 and is last" );
+	bool aboutOnlyAtEnd = true;
+	for( unsigned int id = 0; id < Genlock::PT_ABOUT_FIRST; ++id )
+		if( plugin.GetParamType( id ) == FF_TYPE_TEXT || plugin.GetParamType( id ) == FF_TYPE_EVENT )
+			aboutOnlyAtEnd = false;
+	Check( aboutOnlyAtEnd, "no text or button parameter before it" );
+
+	struct Expected
+	{
+		unsigned int id;
+		const char* name;
+		float value;
+	};
+	//Every control's default, the two new ones included. The old ones are
+	//the values cf17b14 declared; nothing about them was meant to move.
+	const Expected expected[] = {
+		{ Genlock::PT_KEY_SOURCE, "Key Source", 0.0f },
+		{ Genlock::PT_KEY_R, "Key Colour Red", 0.0f },
+		{ Genlock::PT_KEY_G, "Key Colour Green", 0.333f },
+		{ Genlock::PT_KEY_B, "Key Colour Blue", 0.667f },
+		{ Genlock::PT_TOLERANCE, "Tolerance", 0.12f },
+		{ Genlock::PT_SOFTNESS, "Softness", 0.06f },
+		{ Genlock::PT_INVERT, "Invert", 0.0f },
+		{ Genlock::PT_AMIGA_MODE, "Amiga Mode", 0.0f },
+		{ Genlock::PT_KEY_DELAY, "Key Delay", 0.4375f },
+		{ Genlock::PT_CLOCK_ERROR, "Clock Error", 0.30f },
+		{ Genlock::PT_CRAWL_RATE, "Crawl Rate", 0.25f },
+		{ Genlock::PT_CRAWL_WRAP, "Crawl Wrap", 0.0f },
+		{ Genlock::PT_SYNC_QUALITY, "Sync Quality", 1.0f },
+		{ Genlock::PT_ROLL_RATE, "Roll Rate", 0.125f },
+		{ Genlock::PT_FADER, "Fader", 1.0f },
+		{ Genlock::PT_DISSOLVE, "Dissolve", 0.5f },
+		{ Genlock::PT_FRINGE, "Fringe", 0.35f },
+		{ Genlock::PT_TINT_R, "Edge Tint Red", 0.25f },
+		{ Genlock::PT_TINT_G, "Edge Tint Green", 0.95f },
+		{ Genlock::PT_TINT_B, "Edge Tint Blue", 1.0f },
+		{ Genlock::PT_OPACITY, "Opacity", 1.0f },
+	};
+	int wrong = 0;
+	for( const Expected& e : expected )
+	{
+		const char* name = plugin.GetParamName( e.id );
+		if( name == nullptr || std::strcmp( name, e.name ) != 0 || plugin.GetFloatParameter( e.id ) != e.value )
+		{
+			std::printf( "    %u: got \"%s\" = %g, want \"%s\" = %g\n", e.id, name ? name : "", plugin.GetFloatParameter( e.id ),
+			             e.name, static_cast< double >( e.value ) );
+			++wrong;
+		}
+	}
+	Check( wrong == 0, fmt( "every control has its name, its place and its default (%.0f wrong)", wrong ) );
+
+	Check( plugin.GetParamType( Genlock::PT_AMIGA_MODE ) == FF_TYPE_OPTION
+	           && plugin.GetNumParamElements( Genlock::PT_AMIGA_MODE ) == AM_COUNT
+	           && std::strcmp( plugin.GetParamElementName( Genlock::PT_AMIGA_MODE, 0 ), "Lores" ) == 0
+	           && std::strcmp( plugin.GetParamElementName( Genlock::PT_AMIGA_MODE, 1 ), "Hires" ) == 0
+	           && std::strcmp( plugin.GetParamElementName( Genlock::PT_AMIGA_MODE, 2 ), "Superhires" ) == 0,
+	       "Amiga Mode is a dropdown: Lores, Hires, Superhires" );
+
+	//The constants the defaults resolve to, against the old ones written
+	//out as literals.
+	Check( AmigaWidthForMode( AM_LORES ) == 320.0 && AmigaPixelClockHzForMode( AM_LORES ) == 7093790.0,
+	       "lores is 320 across at 7093790 Hz, the old kAmigaWidth and kAmigaPixelClockHz" );
+	Check( CrawlWrapAmigaPxFromParam( 0.0f ) == 1.0 && CrawlWrapAmigaPxFromParam( 1.0f ) == 16.0,
+	       "Crawl Wrap's default is exactly one pixel, the old kCrawlWrapAmigaPx, and its top is sixteen" );
+	Check( CrawlWrapParamFor( 1.0 ) == 0.0f && CrawlWrapParamFor( 16.0 ) == 1.0f && CrawlWrapParamFor( 8.5 ) == 0.5f,
+	       "CrawlWrapParamFor inverts the map at both ends and the middle" );
+
+	//The plugin at its defaults, frame by frame, against the old formula --
+	//bitwise, because it is the same double arithmetic in the same order.
+	//Clock Error is raised from its default so the crawl crosses the
+	//one-pixel wrap inside the run: at the default 0.13 ppm it would not
+	//wrap in a second, and a wrap that never happens is not being tested.
+	const float fastClock = 0.6f;//1.66 ppm, 11.8 px/s: eleven wraps in 60 frames
+	const int off         = framesOffOldFormula( {}, fastClock );
+	Check( off == 0, fmt( "at the defaults the crawl and delay are the old formula's, bit for bit (%.0f of 60 frames differ)",
+	                      off ) );
+
+	//Negative controls: the same comparison, with each new control moved off
+	//its default, must NOT match.
+	const int offWrap = framesOffOldFormula( { { "Crawl Wrap", 1.0f } }, fastClock );
+	Check( offWrap > 0, fmt( "negative control, Crawl Wrap at 16: the comparison FAILS (%.0f of 60 frames differ)", offWrap ) );
+	const int offMode = framesOffOldFormula( { { "Amiga Mode", 1.0f } }, fastClock );
+	Check( offMode > 0, fmt( "negative control, Amiga Mode at Hires: the comparison FAILS (%.0f of 60 frames differ)", offMode ) );
+
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
+// --mutation
+//
+// Proves the checks are measuring the GLSL that ships, not a copy of it:
+// the plugin's own shader text, with one character changed, must fail one.
+//---------------------------------------------------------------------------
+int runMutation()
+{
+	std::printf( "one character of the shipped shader, changed, must fail a check\n\n" );
+
+	//The key fetch: `uv - vec2( KeyDelay, 0.0 )`. Flipping the minus to a
+	//plus delays the key the other way -- the fringe on the wrong side of
+	//every edge -- and changes nothing else.
+	const std::string shipped = kGenlockShader;
+	const std::string site    = "uv - vec2( KeyDelay, 0.0 )";
+	const size_t at           = shipped.find( site );
+	Check( at != std::string::npos && shipped.find( site, at + 1 ) == std::string::npos,
+	       "the mutation site occurs exactly once in the shipped shader" );
+	if( at == std::string::npos )
+		return 1;
+	std::string mutant       = shipped;
+	mutant[ at + 3 ]         = '+';
+	int changed              = 0;
+	for( size_t i = 0; i < shipped.size(); ++i )
+		changed += shipped[ i ] != mutant[ i ];
+	Check( changed == 1, fmt( "the mutant differs from the shipped shader in %.0f character", changed ) );
+
+	//The default path and the test hook, given the SAME text, render the
+	//same bytes -- so what the hook compiles is what the plugin compiles.
+	const int width = 320, height = 180;
+	Image viaDefault, viaHook;
+	{
+		Rig rig;
+		if( !rig.Init( width, height ) )
+			return 1;
+		ModeSettings s;
+		s.keyDelay = delayParam( -6.0 );
+		const ModeRun run = renderModes( rig, s, 1 );
+		viaDefault        = run.ok ? run.frames[ 0 ] : Image();
+	}
+	{
+		g_fragmentForNextRig = shipped.c_str();
+		Rig rig;
+		const bool ready     = rig.Init( width, height );
+		g_fragmentForNextRig = nullptr;
+		if( !ready )
+			return 1;
+		ModeSettings s;
+		s.keyDelay = delayParam( -6.0 );
+		const ModeRun run = renderModes( rig, s, 1 );
+		viaHook           = run.ok ? run.frames[ 0 ] : Image();
+	}
+	Check( !viaDefault.empty() && !viaHook.empty() && maxByteDifference( viaDefault, viaHook ) == 0,
+	       "the shipped text through the hook renders the default path's bytes" );
+
+	//And the mutant through the same hook fails the Key Delay check. The
+	//check is re-run whole, with every one of its claims, and must fail.
+	{
+		//keyDelayAcrossModes builds its own rig, so the hook is reached
+		//through the harness's rig-level default: g_fragmentForNextRig.
+		g_fragmentForNextRig  = mutant.c_str();
+		const Outcome outcome = keyDelayAcrossModes( width, height, Genlock::FAULT_NONE, false );
+		g_fragmentForNextRig  = nullptr;
+		expectFailure( outcome, "`uv - vec2( KeyDelay` mutated to `uv + vec2( KeyDelay` in the shipped GLSL" );
+	}
+	{
+		g_fragmentForNextRig = shipped.c_str();
+		const Outcome outcome = keyDelayAcrossModes( width, height, Genlock::FAULT_NONE, false );
+		g_fragmentForNextRig  = nullptr;
+		Check( outcome.pass, "and the unmutated text through the same hook passes it" + ( outcome.pass ? std::string()
+		                                                                                                : " -- " + outcome.firstFailure ) );
+	}
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
 // --bench
 //---------------------------------------------------------------------------
 double benchAt( int width, int height, int frames, double fps )
@@ -1916,6 +2822,9 @@ void usage()
 		"  --crawl           the delay walks at the rate the clock error predicts\n"
 		"  --roll            the overlay rolls at the stated rate and wraps, at two rasters\n"
 		"  --fader           at Video the output IS Dest\n"
+		"  --modes           Amiga Mode and Crawl Wrap: what scales, what does not, at two rasters\n"
+		"  --defaults        the new controls' defaults reproduce the old behaviour exactly\n"
+		"  --mutation        one character of the shipped GLSL, changed, fails a check\n"
 		"  --bench           time ProcessOpenGL at 720p through 4K\n"
 		"  --help\n" );
 }
@@ -1979,7 +2888,8 @@ int main( int argc, char** argv )
 		else if( argument == "--bench" )
 			wantBench = true;
 		else if( argument == "--names" || argument == "--mixer" || argument == "--delay"
-		         || argument == "--crawl" || argument == "--roll" || argument == "--fader" )
+		         || argument == "--crawl" || argument == "--roll" || argument == "--fader" || argument == "--modes"
+		         || argument == "--defaults" || argument == "--mutation" )
 			check = argument;
 		else
 		{
@@ -2030,6 +2940,12 @@ int main( int argc, char** argv )
 		result = runRoll();
 	else if( check == "--fader" )
 		result = runFader();
+	else if( check == "--modes" )
+		result = runModes();
+	else if( check == "--defaults" )
+		result = runDefaults();
+	else if( check == "--mutation" )
+		result = runMutation();
 	else if( wantBench )
 		result = runBench( frames > 1 ? frames : 60, fps );
 	else

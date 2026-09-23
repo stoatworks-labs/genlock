@@ -13,8 +13,12 @@
 #                 with two MaxUVs, the key's delay behind the fill as a
 #                 whole-pixel translation AND as partial coverage, the
 #                 crawl against the closed form the clock error predicts,
-#                 the roll and its wrap at TWO rasters, and what the
-#                 fader's Video position is actually worth
+#                 the roll and its wrap at TWO rasters, what the fader's
+#                 Video position is actually worth, what Amiga Mode and
+#                 Crawl Wrap scale and what they do not (at 640x360 and
+#                 320x180, each with a negative control), that their
+#                 defaults ARE the old behaviour, and that a one-character
+#                 mutation of the shipped GLSL fails a check
 #   sweep         does every control change the picture
 #   registration  does the bundle contain a plugin at all -- a file-scope
 #                 CFFGLPluginInfo nothing names, which a linker may drop
@@ -158,7 +162,7 @@ fi
 GLTEST="$BUILD/gltest"
 
 step "suites"
-for t in names mixer delay crawl roll fader; do
+for t in names defaults mixer delay crawl roll fader modes mutation; do
 	if "$GLTEST" --$t >/dev/null 2>&1; then pass "gltest --$t"; else fail "gltest --$t"; fi
 done
 

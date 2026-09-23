@@ -38,6 +38,18 @@ default 0.12 the card's colour 0 is the only thing within reach of the key, so
 Key Colour Green and Key Colour Blue swept from end to end key nothing at
 either position and read as dead. They are swept with Tolerance at 0.5.
 
+**Amiga Mode is swept at a four-pixel Key Delay.** At the default one-pixel delay
+lores against superhires is one output texel against a quarter of one at
+320x180. That does change the picture here, but only through the partial
+coverage of a quarter texel, which is exactly the rasteriser-dependent kind of
+difference a GPU-less runner may round differently. At four pixels the fringe
+is four texels against one, and the difference does not rest on the filter.
+
+**Crawl Wrap needs a crawl that reaches the wrap.** At the default Clock Error the
+crawl walks about half a pixel in thirty frames, never reaching even the
+one-pixel wrap, so a 1-pixel and a 16-pixel wrap render the same frame. It is
+swept at Clock Error 0.6 (about 12 Amiga pixels a second), thirty frames in.
+
 **Dissolve only exists at the Dissolve fader position.** At Video and at Overlay
 the pot is not in the signal path, which is what a three-position fader means.
 
@@ -84,7 +96,9 @@ CONTEXT = {
     "Key Colour Red": KEY_COLOUR,
     "Key Colour Green": KEY_COLOUR,
     "Key Colour Blue": KEY_COLOUR,
+    "Amiga Mode": {"Key Delay": 0.25},
     "Clock Error": {"_frames": 30},
+    "Crawl Wrap": {"Clock Error": 0.6, "_frames": 30},
     "Crawl Rate": {"_frames": 30},
     "Roll Rate": {"Sync Quality": 0.2, "_frames": 30},
     "Sync Quality": {"_frames": 30},
