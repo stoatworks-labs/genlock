@@ -30,6 +30,38 @@ down every graphic's edges is where the key and the fill disagree: at a left
 edge it is the palette's colour 0 laid over the video, at a right edge it is
 video cut into the graphic, and Edge Tint has coloured both.</sub>
 
+<!-- downloads:start -->
+
+## Download
+
+**[v0.1.0](https://github.com/stoatworks-labs/genlock/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+
+<details>
+<summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`genlock-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/genlock/releases/download/v0.1.0/genlock-0.1.0-macos-universal.dmg) | 213 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`genlock-macos-universal.zip`](https://github.com/stoatworks-labs/genlock/releases/latest/download/genlock-macos-universal.zip) | 173 KB |
+
+</details>
+
+<details>
+<summary><b>Windows</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .exe installer | [`genlock-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/genlock/releases/download/v0.1.0/genlock-0.1.0-windows-x86_64-setup.exe) | 221 KB |
+| x64 · .zip archive | [`genlock-windows-x86_64.zip`](https://github.com/stoatworks-labs/genlock/releases/latest/download/genlock-windows-x86_64.zip) | 111 KB |
+
+</details>
+
+All builds, checksums and release notes: [github.com/stoatworks-labs/genlock/releases](https://github.com/stoatworks-labs/genlock/releases).
+
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
+
+<!-- downloads:end -->
+
 ## The key comes from the wrong clock
 
 That is the whole design, and everything else follows from it.
