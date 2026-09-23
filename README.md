@@ -30,6 +30,12 @@ down every graphic's edges is where the key and the fill disagree: at a left
 edge it is the palette's colour 0 laid over the video, at a right edge it is
 video cut into the graphic, and Edge Tint has coloured both.</sub>
 
+**[Try it in your browser](https://genlock-demo.stoatworks-labs.com)** — the
+plugin's own shader ported to WebGL2, mixing a generated clip (or your own
+video) for the layer below with the harness's own test cards for this layer,
+with every control. It is a port and not the plugin: read what
+[the page itself says it does not reproduce](https://genlock-demo.stoatworks-labs.com).
+
 <!-- downloads:start -->
 
 ## Download
@@ -271,7 +277,8 @@ rendering; the render cost is still macOS-only. The
 universal build has never run on an Intel Mac. Premultiplied alpha is assumed
 rather than measured. The **tear** at the roll seam is a look, not a model:
 nothing measures it and no real hardware was consulted. There are **no
-presets**, no OpenFX port and no browser demo.
+presets** and no OpenFX port. The [browser demo](https://genlock-demo.stoatworks-labs.com)
+runs the plugin's shader but not the plugin, and says how it differs.
 
 **Amiga Mode and Crawl Wrap are arithmetic, not observation.** The rule — pixel
 clocks scale with the mode, time errors do not — is argued in `Controls.h` and

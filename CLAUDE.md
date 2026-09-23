@@ -107,7 +107,16 @@ behaves, and the reasoning behind every number `gltest` asserts.
   was a manual probe. The universal build has never run on an Intel
   Mac. (CI ran the checks on the macOS runner's software renderer and passed;
   MSVC compiled the Windows DLL.)
-- No presets, no OpenFX port, no browser demo.
+- No presets and no OpenFX port.
+- `demo/` is the browser demo at genlock-demo.stoatworks-labs.com: the plugin's
+  two shaders, unedited, over a JS port of `Controls.cpp`, `Timing.cpp` and
+  `ProcessOpenGL`'s uniforms. Dest is the kit's clip; Src is one of gltest's
+  `amiga`/`bar`/`edge` cards, ported. `demo/vendor/` is the shared kit — do not
+  edit it; `stoatworks-backend/resolume-demo/sync.sh genlock` copies it in.
+  After changing `source/Shaders.cpp`, copy it into `demo/plugin.js` too —
+  `python3 demo/tools/check_shaders.py` (run by `verify.sh`) fails on drift.
+  Deploy from the repo root: `cf-run npx wrangler deploy`, then check the
+  `<title>` of `https://genlock-demo.stoatworks-labs.com/?cb=1`.
 
 ## Diagnostics
 

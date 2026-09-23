@@ -150,6 +150,26 @@ else
 fi
 
 #---------------------------------------------------------------------------
+# The browser demo's copies of the shaders are still the shaders.
+#
+# demo/plugin.js carries the two GLSL strings from source/Shaders.cpp, and two
+# copies of a shader drift quietly: a demo that renders a plausible picture
+# looks exactly like one that renders the right one. Nothing else here would
+# notice -- gltest drives the real plugin class and has no idea the page exists.
+#---------------------------------------------------------------------------
+step "demo"
+if [ -f demo/tools/check_shaders.py ]; then
+	if out="$( python3 demo/tools/check_shaders.py 2>&1 )"; then
+		pass "$( printf '%s' "$out" | tail -1 )"
+	else
+		fail "the demo's shader copies have drifted from source/Shaders.cpp"
+		printf '%s\n' "$out" | tail -12
+	fi
+else
+	printf '   skipped: demo/tools/check_shaders.py is not present\n'
+fi
+
+#---------------------------------------------------------------------------
 # A fresh universal Release build -- the one that ships. The dev build in
 # build/ is arm64 only and is not what any of the binary checks below should
 # be looking at.

@@ -516,11 +516,65 @@ failing after the fix. `touch` the file, or `sleep 1`.
     tools/gltest/           the offline harness. Two inputs.
     tools/sweep.py          no control is silently dead.
     tools/verify.sh         all of it.
+    demo/plugin.js          the browser demo: the two shaders, unedited, and a
+                            JS port of the CPU half.
+    demo/tools/             check_shaders.py -- the two copies agree.
+    demo/vendor/            the shared kit, copied in by sync.sh. Do not edit.
 
 One pass, three fetches: the video at the fragment's position, the fill at the
 overlay's rolled position, and the key at the overlay's rolled position
 displaced by the delay. Everything is in picture space, 0..1 across the output,
 with each input's `MaxUV` applied once at its own fetch.
+
+---
+
+## The browser demo
+
+`demo/` is the page at **genlock-demo.stoatworks-labs.com**, added 2026-09-24
+after the release. It is a *port*, not a recording and not the plugin — the
+fleet's first demo of a **mixer**, so several of its decisions are new.
+
+- **The shaders are the plugin's.** `VERTEX_SHADER` and `GENLOCK_SHADER` in
+  `demo/plugin.js` are `kVertexShader` and `kGenlockShader`, unedited;
+  `demo/tools/check_shaders.py` compares them character for character and
+  `tools/verify.sh` runs it (step "demo"). Change the C++, copy it across.
+- **The CPU half is a port that only a reader checks**: `Controls.cpp`'s
+  conversions (with `Math.fround` where the C++ is float), `Timing.cpp`'s
+  `CrawlPhase`/`RollPhase`/`PositiveMod`, and `ProcessOpenGL`'s uniform
+  arithmetic — the crawl added to the key delay before the division by the
+  mode's width, the tear thrown in lores pixels in every mode, the lock
+  threshold as a branch. The harness's fault switches are not ported.
+- **Two inputs, and the kit makes one.** Dest (`inputTextures[0]`, the layer
+  below) is the kit's clip, so the Clip dropdown and "Use my own…" both drive
+  it; the page relabels them "Layer below (Dest)" and "Own video below…". Src
+  (`inputTextures[1]`, this layer) is one of gltest's own cards — `amigaCard`,
+  `barCard`, `edgeCard`, ported pixel for pixel from `tools/gltest/main.cpp`
+  and uploaded bottom row first as gltest does — chosen with the kit's
+  `demo.variants` dropdown ("This layer (Src)"), because which picture is on
+  the other layer is not a parameter. All three are on #0055AA, the Key Colour
+  default, so the default key finds them. Chosen over a new generated "Amiga"
+  clip because those cards are what the plugin was measured on; a picture
+  invented for the page would be a claim nothing backs.
+- **Both inputs are the composition's size and unpadded**, so both MaxUVs are
+  exactly 1 — the padding Arena really sends (1280x720 of 1280x768) is not
+  reproduced. The half-texel insets are each input's own. Disclosed.
+- **Key Source is on the panel** although Arena hides it: the plugin declares
+  it. Its hint and the disclosure say that in Resolume the key is always
+  Colour 0. **Opacity is a slider**, and the hint says in Resolume it is the
+  layer's opacity fader.
+- **The clock is the page's**: already seconds from zero, so `Clock`'s unit
+  vote and epoch are skipped. Restart is a new epoch.
+- **Presets are the page's**, labelled as such; the plugin ships none. A
+  status line under the picture shows key delay + crawl, the crawl rate and
+  the lock state — the numbers the Diag log carries.
+- **The About block is absent.** No audio caveat: Genlock has no audio path.
+- **The banner calls it an "FFGL effect"**: that closing sentence is the kit's
+  and fixed on every page. The disclosure says Genlock is a mixer.
+
+Deploy from the repo root with `cf-run npx wrangler deploy` and verify by
+content: `curl -s 'https://genlock-demo.stoatworks-labs.com/?cb=1' | grep -o
+'<title>[^<]*'`. There is no `deploy.yml`; the page ships when somebody runs
+that.
 
 ---
 
@@ -761,7 +815,8 @@ moving anything.
   disagreement and needs no help; the tint is an extra layer on top of it,
   because a real genlock's fringe also carries chroma crosstalk. The default is
   a cyan chosen by eye.
-- **No OpenFX port and no browser demo.** Neither is required for 0.1.0.
+- **No OpenFX port.** Not required for 0.1.0. The browser demo came after the
+  release; see "The browser demo" below.
 
 ---
 
