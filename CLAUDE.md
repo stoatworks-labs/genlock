@@ -24,12 +24,17 @@ behaves, and the reasoning behind every number `gltest` asserts.
 
 ## Verify
 - Everything: `tools/verify.sh` (fresh universal build + every check, ~8 s)
-- No name over 16 characters: `./build/gltest --names`
+- No name over 16 characters, and no two alike: `./build/gltest --names`
 - Two inputs, two sizes, two MaxUVs, and the guards: `./build/gltest --mixer`
 - The key lags the fill by exactly the stated delay: `./build/gltest --delay`
 - The delay walks at the rate the clock error predicts: `./build/gltest --crawl`
 - The overlay rolls and wraps, at two rasters: `./build/gltest --roll`
 - At Video the output IS Dest: `./build/gltest --fader`
+- What Amiga Mode and Crawl Wrap scale and what they do not, at 640x360 and
+  320x180, each with a negative control that must fail: `./build/gltest --modes`
+- The new controls' defaults ARE the old behaviour, plus names, order and the
+  parameter count: `./build/gltest --defaults`
+- One character of the shipped GLSL, changed, fails a check: `./build/gltest --mutation`
 - ms/frame, 720p through 4K: `./build/gltest --bench`
 - No dead controls: `python3 tools/sweep.py` (`--size WxH`, `--jobs N`)
 
@@ -54,8 +59,16 @@ behaves, and the reasoning behind every number `gltest` asserts.
 - **The shader never sees a clock.** Phases are reduced on the CPU, in double,
   from a frame-relative time: Resolume counts milliseconds and a float stops
   resolving consecutive ones at about 4.99e8.
-- **One Amiga pixel is 1/320 of the picture width** at every raster. PAL lores
-  is assumed throughout.
+- **One Amiga pixel is 1/320, 1/640 or 1/1280 of the picture width** at every
+  raster, by `Amiga Mode`. What is a count of pixel clocks (Key Delay, Crawl
+  Wrap) scales with the mode; what is a time error (the crawl's speed across
+  the picture, the tear's throw, which is always in LORES pixels) does not.
+  `Controls.h` says which beside each constant. PAL is assumed throughout.
+- **Amiga Mode and Crawl Wrap default to lores and one pixel**, which renders
+  byte-identically to the plugin before they existed. `--defaults` holds that.
+- `Genlock::SetFaultForTest` / `SetFragmentShaderForTest` are harness-only hooks
+  for the negative controls and the mutation test. Nothing a host does reaches
+  them.
 - `SetParamInfo` clamps a STANDARD default into 0..1, so every ranged parameter
   is 0..1 and the conversions live in `Controls.cpp`.
 - Override `SetTextParameter` to return `FF_SUCCESS` for the About block, or no
@@ -79,3 +92,9 @@ behaves, and the reasoning behind every number `gltest` asserts.
 Resolume).
 
     ~/Library/Logs/genlock/genlock.YYYY-MM-DD.log
+
+The first line is written at LOAD time and names the file the host loaded.
+Host callbacks, the input guards, the clock and Opacity changes are logged for
+a first Arena run — AGENTS.md, "Reading the log after an Arena run", says what
+each line answers. `GENLOCK_LOG_DIR` moves the log; `verify.sh` sets it so the
+harness never writes into the one an Arena run is read from.

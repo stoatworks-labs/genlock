@@ -8,8 +8,9 @@
 > — a whole-pixel key delay translating the key **exactly, 0 of 164 bytes
 > different**, a fractional one recovered from partial coverage at **0.4941
 > output texels against a predicted 0.5000**, the crawl following the closed
-> form its clock error predicts to **0.0176 texels over 30 frames**, and the
-> roll landing **within 0.0000 rows** at two different rasters (see
+> form its clock error predicts to **0.0176 texels over 30 frames**, the
+> roll landing **within 0.0000 rows** at two different rasters, and the crawl's
+> speed across the picture **bit-identical** in lores, hires and superhires (see
 > [Status](#status)). It has **never been loaded into Resolume**, on any
 > platform — not once. It is the fleet's first FFGL *mixer*, and several things
 > about how a host treats one are still guesses. Check it in your own rig before
@@ -44,9 +45,10 @@ because the two clocks differ, that error walks.
 - **The fringe crawls.** `Clock Error` is in parts per million, and the crawl
   rate falls out of it: the Amiga's 7.09379 MHz lores pixel clock times the
   fractional error. A real genlock re-locks on every line sync, so only the
-  sub-pixel remainder survives — the fringe walks one Amiga pixel and snaps
-  back, over and over. At 0.01 ppm that takes fourteen seconds; at 50 ppm, an
-  ordinary crystal's tolerance, it is a blur.
+  remainder survives — the fringe walks as far as `Crawl Wrap` allows (one
+  Amiga pixel by default) and snaps back, over and over. At 0.01 ppm one lores
+  pixel takes fourteen seconds; at 50 ppm, an ordinary crystal's tolerance, it
+  is a blur.
 - **Loss of vertical lock.** Drop `Sync Quality` below half and the overlay
   rolls at `Roll Rate` and tears at the seam. The video does not move — the
   overlay is the thing that has lost lock.
@@ -64,13 +66,23 @@ incoming video, and the clip on this layer is the computer's picture.
 **Key** — Key Source (Colour 0, Luma or Alpha), Key Colour as a swatch (the
 default is Workbench blue, `#0055AA`), Tolerance, Softness and Invert.
 
-**Timing** — Key Delay (−8 to +8 Amiga pixels, signed; negative lays colour 0
-over the video, positive cuts video into the fill), Clock Error (0.01 to 50 ppm,
-geometrically), Crawl Rate, Sync Quality and Roll Rate.
+**Timing** — Amiga Mode (Lores, Hires or Superhires), Key Delay (−8 to +8
+Amiga pixels, signed; negative lays colour 0 over the video, positive cuts video
+into the fill), Clock Error (0.01 to 50 ppm, geometrically), Crawl Rate, Crawl
+Wrap (1 to 16 Amiga pixels: how far the fringe walks before the line sync
+pulls it back — one is a genlock that re-locks cleanly, sixteen is the length
+of the PAL colour burst it locks to), Sync Quality and Roll Rate.
 
-One Amiga pixel is 1/320 of the picture width at every raster, because an Amiga
-lores line is 320 pixels across the active picture whatever the monitor is. So
-a one-pixel fringe is the same fraction of the frame at 720p and at 4K.
+One Amiga pixel is 1/320 of the picture width in lores, 1/640 in hires and
+1/1280 in superhires, at every raster — an Amiga line is that many pixels
+across the active picture whatever the monitor is, so a one-pixel fringe is the
+same fraction of the frame at 720p and at 4K. The mode decides what an "Amiga
+pixel" means, and it moves only what the computer counts in its own pixel
+clocks: Key Delay and Crawl Wrap are half the distance in hires and a quarter
+in superhires. The crawl's *speed* across the picture and the tear's throw are
+time errors in the incoming video, and are the same in every mode. The defaults
+— lores, a one-pixel wrap — render exactly what the plugin rendered before
+either control existed.
 
 **Fader** — the three-position switch, and the Dissolve pot that only exists at
 the Dissolve position.
@@ -111,6 +123,9 @@ hardware padding, rendered to an output that is a third size again.
     ./build/gltest --crawl                  the delay walking, against the closed form
     ./build/gltest --roll                   the roll and its wrap, at two rasters
     ./build/gltest --fader                  what "the output IS Dest" is worth
+    ./build/gltest --modes                  what Amiga Mode and Crawl Wrap scale, at two rasters
+    ./build/gltest --defaults               the new controls' defaults ARE the old behaviour
+    ./build/gltest --mutation               one character of the shipped GLSL fails a check
     ./build/gltest --bench                  720p through 4K
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
@@ -126,7 +141,8 @@ where it comes from.
 ## Status
 
 **v0.1.0, unreleased, and honestly early.** Verified by measurement on an Apple
-M4 Max, macOS 26.4.1, 2026-09-22:
+M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and Crawl Wrap rows
+2026-09-23:
 
 | Check | Result |
 | --- | --- |
@@ -139,9 +155,15 @@ M4 Max, macOS 26.4.1, 2026-09-22:
 | Roll | at **two rasters** — 640×360 (6 whole rows/frame, 23 of 23 exact rotations) and 480×270 (4.5 rows/frame, 11 exact and 12 fractional) — worst **0.0000 rows**, tolerance 0.05; byte-identical after one period |
 | Loss of lock | a branch, not a fade: locked, two frames a second apart are byte-identical |
 | Fader at Video | **bitwise** Dest, 0 bytes, at matched rasters — for a stated reason. At an unmatched raster it is a resample and no claim is made |
-| No dead controls | all **19** sweepable of the 23 parameters measurably change the picture; the other four are the About buttons, which `tools/sweep.py` skips |
+| Amiga Mode: the crawl | its speed across the picture is **bit-identical** in lores, hires and superhires — in the arithmetic, in the plugin's own phase, and in the rendered frames byte for byte over 24 frames — and follows the lores physics to **0.0083 texels** at 640×360 and **0.0619** at 320×180 |
+| Amiga Mode: Key Delay | −8 of the mode's pixels moves the key **−16.0024 / −8.0024 / −4.0024** texels at 640×360 (predicted −16 / −8 / −4), and hires at −8 is lores at −4 **byte for byte** |
+| Amiga Mode: the tear | the same throw in every mode: **−28.1294** texels at 640×360 against −28.1333 predicted, and the torn frames identical |
+| Crawl Wrap | at 4 pixels of the mode: **3** wraps in lores and **6** in hires over 60 frames, as predicted; the key walks **7.933 of 8.000** texels before it snaps |
+| Negative controls | each of the four mode claims re-run against a plugin with the wrong answer built in **fails in the picture**, at both rasters; a one-character mutation of the shipped GLSL fails the Key Delay check |
+| The defaults are the old plugin | the crawl and delay match the pre-feature formula **bit for bit** over 60 frames; and against the previous commit's own harness, eight scenes rendered **byte-identical PNGs** (checked once, by hand) |
+| No dead controls | all **21** sweepable of the 25 parameters measurably change the picture, at 480×270 and 320×180; the other four are the About buttons, which `tools/sweep.py` skips |
 | macOS binary | a local build is universal (`x86_64 arm64`), exports `plugMain`, and ad-hoc signs |
-| Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2** |
+| Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2 / 25 params**, and loading it that way writes the load-time log line naming the bundle |
 | Render cost | **under 0.12 ms/frame at 4K** — 0.7% of a 60 fps frame. One pass and three texture fetches is so cheap that repeated runs vary by a factor of two (0.04 to 0.12 ms at 4K, 0.024 to 0.036 at 1080p); the figure worth quoting is the ceiling, not a mean |
 
 Run `tools/verify.sh` before believing any of it.
@@ -163,6 +185,20 @@ real hardware was consulted. There are **no presets**, no OpenFX port, no
 browser demo and no user guide — which is why the About block deliberately
 carries no guide link. `StoatworksAbout.h` and `ATTRIBUTIONS.md` are provisional
 hand copies.
+
+**Amiga Mode and Crawl Wrap are arithmetic, not observation.** The rule — pixel
+clocks scale with the mode, time errors do not — is argued in `Controls.h` and
+measured against itself; nobody has compared a hires Workbench through a real
+genlock, and a composite-rate genlock's real bandwidth may make superhires look
+nothing like a quarter-size lores fringe. The 16-pixel ceiling on Crawl Wrap is
+derived from the length of the colour burst, not measured on any genlock. PAL
+only: no NTSC.
+
+**The log is ready for the first Arena session and has never been read from
+one.** It records where the host loaded the bundle from, the host's name and
+version, whether a mixer is called with one input, whether its clock is driven
+and in what unit, and whether `Opacity` moves with the transition — the open
+questions above. [AGENTS.md](AGENTS.md) says what each line answers.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, the traps, and the fleet's only written account of

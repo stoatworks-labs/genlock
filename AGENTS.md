@@ -32,8 +32,9 @@ Everything else is a consequence rather than an effect:
   graphic, video cuts into the graphic. Which one you get is the *sign* of the
   delay, and both are real.
 - **The fringe crawls.** The phase error accumulates at the pixel clock times
-  the fractional frequency error, and the line sync pulls it back a pixel at a
-  time — so the fringe walks one Amiga pixel and snaps, over and over.
+  the fractional frequency error, and the line sync pulls it back — so the
+  fringe walks as far as `Crawl Wrap` lets it (one Amiga pixel by default) and
+  snaps, over and over.
 - **Loss of vertical lock.** Below a sync-quality threshold the overlay rolls
   and tears at the seam. The video does not move; the overlay is the thing that
   has lost lock.
@@ -192,6 +193,10 @@ nothing here has been in front of Resolume.
   way it drives an effect's is unknown, and this plugin's crawl and roll are
   both functions of time.
 
+Every one of these is now a line in the diagnostics log, written for the first
+session in front of Arena to answer — see "Reading the log after an Arena run"
+below. None of them has been answered yet.
+
 ---
 
 ## Every number in the harness
@@ -241,13 +246,71 @@ check in `--delay` and was caught only by the zero-delay anchor.
 | `--fader` bitwise | **zero bytes** | Stated with its conditions. The arithmetic is `mix(video, video, 1.0)` = `video*(1-1) + video*1`: (1-1) is exactly 0, x*0 is 0, x*1 is x, 0+x is x, and an FMA contraction computes the same because neither factor is rounded. The *fetch* is exact only because the output raster equals Dest's and MaxUV is exactly 1, so every sample is a texel centre. Change either and it becomes a resample — which the check then demonstrates at 400×240 into 640×360 and **does not assert**, because a tolerance wide enough to cover a resampled test card's edges would be wide enough to cover a broken fader. |
 | `--fader` at other Opacity | **1 code** | `video*(1-o) + video*o` re-rounds twice and is not an exact cancellation. One code is the readback's floor. Measured 0. |
 | `--fader` dissolve halfway | **1 code** | Also the readback's floor. It was 8 at first, which was fitted to this picture. Measured 127 and 128. |
+| `--modes` crawl, arithmetic | **bitwise** | `rate / width` for 40 settings of Clock Error × Crawl Rate, each mode against lores. Exact because both the clock and the width are the lores value times the same power of two: scaling a double by 2 or 4 is exact, and IEEE division of the same real quotient rounds the same way. No GPU in it. |
+| `--modes` crawl, picture | **zero bytes** across modes, and **0.25 texels** against the physics | Hires and superhires frames are compared to lores byte for byte, frame for frame, over 24 frames of an 8 lores px/s crawl — the same uniform bits through the same program object, so GL's repeatability rule is all it rests on. And each mode's key edge is measured against the closed form **in lores pixels**, not against the other modes, which would pass a plugin wrong the same way in all three. Worst 0.0083 texels at 640×360, 0.0619 at 320×180. |
+| `--modes` Key Delay | **0.25 texels**, and **zero bytes** | −8 of the mode's pixels is −16, −8 and −4 texels at 640 wide and −8, −4, −2 at 320 — whole numbers, asserted. Measured −16.0024, −8.0024, −4.0024 and −8.0045, −4.0045, −2.0045 (a constant −0.002/−0.005 that is the card's own quantisation, identical in every mode). And hires at −8 is lores at −4 **byte for byte**, superhires at −8 is lores at −2: (−8)/640 and (−4)/320 are the same float, which is checked on the CPU first. |
+| `--modes` tear | **0.25 texels**, and **zero bytes** | The fill's edge (key off) in the two seam rows against the middle row, which leans not at all, at roll phase exactly 0. Predicted from the shader's own lean and the float throw: −28.1333 texels at 640, −13.7333 at 320; measured −28.1294 and −13.7294 in all three modes. The bound uses 85 codes of contrast, not 170, because the fill runs 170→255 in blue. The three torn frames are the same bytes. |
+| `--modes` wrap | **1e-9 px**, **0.25 texels**, a **wrap count**, and the **reach** | Crawl Wrap at 4 pixels of the mode, lores and hires, 60 frames: the reduced phase against `PositiveMod(rate·t, 4)`; the key edge against it in texels; 3 wraps (lores) and 6 (hires) predicted and counted with a half-period threshold in texels of THIS raster and mode; and the furthest the key walks before it snaps within one frame's travel of the wrap and never past it — 7.933 of 8.000 texels, 3.933 of 4.000, 3.974 of 4.000, 1.974 of 2.000. The rate (14 lores px/s) puts no wrap on a frame boundary, so no count depends on which way a rounding falls. |
+| `--defaults` | **bitwise** | The plugin's reduced crawl and delay over 60 frames against the pre-feature formula restated with its literals (7093790 Hz, a wrap of 1.0), at Clock Error 0.6 so the one-pixel wrap is crossed eleven times. The same double arithmetic in the same order, so equal is the only honest claim. Plus every control's name, place and default, 25 parameters, About last. |
+| `--mutation` | **fails** | The shipped fragment shader with `uv - vec2( KeyDelay` changed to `uv + vec2( KeyDelay` — one character, asserted — fails the Key Delay claims; the unmutated text through the same test hook passes them and renders the default path's bytes. |
 | `--bench` | not asserted | There is no threshold worth asserting on somebody else's GPU. |
 
 **Negative controls actually run**, because a check that cannot fail is not a
 check: wrong MaxUV (3 assertions fail), no half-texel inset (1 fails), roll rate
 off by 0.1% (4 fail at each raster), one code added to the output (2 fail),
 constant bias on the key fetch (the zero-delay anchor fails, and nothing else
-does — which is why the anchor is there).
+does — which is why the anchor is there). Those were run once, by hand.
+
+**The mode checks ship theirs.** `Genlock::SetFaultForTest` builds the wrong
+answer to each "does it scale?" question into the real `ProcessOpenGL` — the
+crawl on the lores clock in every mode, Key Delay in lores pixels, the tear in
+the mode's pixels, Crawl Wrap ignored — and `--modes` re-runs every claim of
+the matching check against it, silently, then asserts that **a claim measured
+out of the picture** failed. (Not merely any claim: a fault caught only by the
+plugin's report of its own phase would prove the plumbing is checked, not the
+pixels. Before this requirement the wrap control's negative control reported
+its failure through the plugin's phase report, which proves nothing about the
+pixels.) All five fail in the picture at both rasters. `--defaults` does the
+same with the controls themselves: Crawl Wrap at 16 (54 of 60 frames differ)
+and Amiga Mode at Hires (59 of 60) both break the old-formula comparison.
+
+**The GLSL mutation test ships too** (`--mutation`), and verify.sh runs it.
+
+### Would this hold on another rasteriser, at another raster?
+
+One line per check added with Amiga Mode and Crawl Wrap. Every one runs at
+640×360 **and** 320×180, CI's raster, and every window, prediction and bound in
+it is computed from the raster rather than typed.
+
+- **Crawl, arithmetic** — no rasteriser in it at all. Exact by IEEE-754.
+- **Crawl, byte identity across modes** — yes: identical uniform bits through one
+  program object on one set of textures, and GL's repeatability rule requires
+  the same result. It does NOT depend on the rasteriser computing the right
+  answer, only the same one twice.
+- **Crawl, edge vs physics** — yes, same derivation as `--crawl`; the bound is
+  0.031 texels at 640 and 0.020 at 320 against a 0.25 tolerance. Every frame is
+  a fractional offset, so this is a partial-coverage measurement throughout.
+- **Key Delay, edge** — yes at both: every predicted shift is a whole number of
+  texels at both rasters, asserted, and the measurement is still the
+  partial-coverage integral, so it does not rely on that.
+- **Key Delay, byte identity with lores** — yes: same float uniform, checked on
+  the CPU before the GPU is asked.
+- **Tear** — yes: the throw is a fractional shift, measured by integrating the
+  fill's own blue ramp, which translates exactly under linear interpolation;
+  the bound (0.055 texels at 640, 0.031 at 320) is from an 85-code contrast.
+  Lean is computed from the shader's own formula at the row centre, so a
+  different raster moves the prediction, not the tolerance.
+- **Wrap** — yes, with one margin that is tight by construction: 4 hires pixels
+  at 320 wide is exactly 2 texels, exactly the "8 × tolerance" signal floor,
+  asserted with `>=`. A narrower raster than 320 would fail that assertion
+  rather than the measurement, which is the intended way to fail.
+- **Defaults** — no rasteriser: Timings against a double-precision formula.
+- **Mutation** — the byte identity between the default path and the hook is two
+  compiles of the same text in one context. A compiler that compiled the same
+  source differently twice would fail it; none is known to.
+
+**What this pass does not prove** is unchanged from above: derived is not proven,
+and nothing here has run anywhere but this Mac.
 
 **What this pass does not prove.** Every tolerance is derived from the GL spec's
 own guarantees rather than from a measurement — but *derived* is not *proven*,
@@ -311,14 +374,41 @@ base class's `SetTextParameter` is a stub that returns exactly that failure.
 start, and past about 4.99e8 a 32-bit float can no longer represent consecutive
 milliseconds. Anything computed from an absolute host time in float stops
 moving. `Timing.h` takes the first reading as an epoch, works in double, and
-hands the shader a phase already reduced into its own period — under one Amiga
-pixel for the crawl, under one picture height for the roll.
+hands the shader a phase already reduced into its own period — under `Crawl
+Wrap` for the crawl, under one picture height for the roll.
 
 **The host's clock unit has to be worked out by observation.** The FFGL header
 never says whether `SetTime` is seconds or milliseconds and hosts disagree;
 Resolume sends milliseconds. `timing::Clock` votes on the ratio against a real
 clock for four frames, exactly as tinsel does. The harness declares its unit
 instead of letting the calibration infer one.
+
+**A key delayed to the RIGHT cannot be read with a flat-fill inversion.**
+`keyAcrossRow` recovers the key as `(out - fill) / (video - fill)` with the fill
+taken as colour 0 everywhere — true only left of the card's edge, which is why
+`--delay` and `--crawl` keep the delay negative. A crawl that starts from a zero
+delay walks the key rightwards, into the ramp and the fill, and the recovered
+key there is nonsense. `keyOverCard` inverts column by column with the card's
+own value, which is valid because the fill fetch is not displaced while locked
+and lands on texel centres at matched rasters; read off blue, the contrast
+never drops below the 170 codes the old bound assumed.
+
+**Two translation units' file-scope objects construct in no promised order.**
+`Diag::init` is now reached from a file-scope constructor in Genlock.cpp, at
+load time. If Diag.cpp's own file-scope `std::string` for the log path were
+constructed AFTER that, it would reset the path to empty and every later line
+would be dropped silently. The state is a function-local static now.
+
+**`fork` inside `dlopen` can hang.** The log directory used to be made with
+`std::system( "mkdir -p ..." )`. Harmless at instantiation; not at load time,
+on whatever host thread is scanning plugins, where the forked child can inherit
+a malloc lock another thread holds. `mkdir(2)` in a loop instead.
+
+**The harness writes to the log an Arena run is read from.** Every `gltest` and
+every sweep render instantiates the real plugin. Its lines say `loaded from
+.../gltest`, so they can be told apart, but `verify.sh` points
+`GENLOCK_LOG_DIR` at a temp directory so they never land there at all. Do the
+same by hand before running the harness around an Arena session.
 
 **`cc` on this machine is a shell function**, not a compiler — it changes
 directory into `~/Projects`. A scratch C file compiled with `cc` fails with "no
@@ -368,12 +458,46 @@ it, and 0 freezes it *without* claiming the clocks are locked. The alternative
 non-redundant and physically meaningful, but a control called "Rate" that is a
 distance is worse than a redundant multiplier.
 
-**The crawl wraps at one Amiga pixel.** A free-running clock at 1 ppm slides
-seven pixels a second, which as a picture would slide off the screen. A real
-genlock re-locks on every horizontal sync, so only the sub-pixel remainder
-survives — the fringe walks a pixel and snaps back. `kCrawlWrapAmigaPx` is that
-remainder, and it is the reason the artefact reads as a crawl rather than as a
-pan.
+**The crawl wraps — by default at one Amiga pixel, and now at up to sixteen.**
+A free-running clock at 1 ppm slides seven pixels a second, which as a picture
+would slide off the screen. A real genlock re-locks on every horizontal sync, so
+only the remainder survives — the fringe walks and snaps back. One pixel is the
+remainder of a genlock that re-locks cleanly (the phase is quantised by the
+pixel clock, so less is not a thing the hardware can hold), and it is the
+default: exactly what this plugin did before `Crawl Wrap` existed. Sixteen is
+the top because it is the colour burst: the lores clock is exactly 1.6 × the PAL
+subcarrier and the burst is ten cycles, so 16 lores pixels long, and a phase
+error bigger than the burst gate is a genlock that has lost lock — `Sync
+Quality`'s job, not this control's. That ceiling is reasoning from the burst's
+length, not a measurement of any genlock.
+
+**`Crawl Wrap` is linear, and counted in pixels of the current mode.** Linear
+because it is a distance the fringe walks and a 16× span does not need a curve
+(`Clock Error` is geometric because its span is 5000×). In the mode's pixels
+because the remainder the line sync leaves is quantised by the pixel clock, so
+it is a count of clocks, exactly like `Key Delay` — 4 hires pixels is 2 lores.
+`--modes` measures it in both.
+
+**Amiga Mode: Lores, Hires, Superhires, first in the Timing group.** It sets the
+unit every other Timing control is stated in, so it sits above them. A quantity
+that is a count of the computer's own pixel clocks scales with it (`Key Delay`,
+the wrap); a time error in the incoming video does not (the crawl's speed across
+the picture, the tear's throw). `Controls.h` says which is which beside each
+constant, and `--modes` holds the plugin to it. Superhires is included because
+it completes the set and its clock is exactly 4× lores; most real genlocks
+could not resolve a 28 MHz pixel, and that is said in the header rather than
+used as a reason to leave the arithmetic out. It is parameter 7, Crawl Wrap is 11, and
+the defaults reproduce the pre-feature render byte for byte (below).
+
+**The tear's throw stays in lores pixels in every mode.** A tear is the incoming
+sync collapsing, a time error; scaling it with the overlay's resolution would
+say the computer's pixel size changes how far a failing sync throws a line.
+
+**The negative controls live in the shipping class.** `SetFaultForTest` and
+`SetFragmentShaderForTest` are two setters and five conditionals in
+`ProcessOpenGL`/`InitGL`, unreachable from a host (nothing but the setters
+changes them, and both start off). The alternative — perturbing the harness's
+inputs to imitate each fault — would test the imitation.
 
 **`Clock Error` is geometric, 0.01 to 50 ppm.** The interesting range is all at
 the bottom: at 0.01 ppm the fringe takes fourteen seconds to walk one Amiga
@@ -382,12 +506,12 @@ and stops reading as a crawl at all. 50 ppm is an ordinary crystal's tolerance
 and looks like a blur, which is the honest answer rather than a reason to
 shorten the range.
 
-**One Amiga pixel is 1/320 of the picture width at every raster.** An Amiga
-lores line is 320 pixels across the active picture whatever the monitor is, so
-the fringe is the same *fraction* of the frame at 720p and at 4K — which is the
-only definition under which an operator's setting means the same thing twice.
-PAL is assumed throughout (7.09379 MHz lores pixel clock); there is no NTSC
-switch and no hires mode.
+**One Amiga pixel is 1/320, 1/640 or 1/1280 of the picture width at every
+raster**, by mode. An Amiga line is that many pixels across the active picture
+whatever the monitor is, so the fringe is the same *fraction* of the frame at
+720p and at 4K — the only definition under which an operator's setting means
+the same thing twice. PAL is assumed throughout (7.09379 MHz lores pixel clock);
+there is no NTSC switch.
 
 **The roll rate does not scale with how far the sync has fallen.** Below the
 threshold the overlay rolls at exactly `Roll Rate`; only the *tearing* scales
@@ -395,7 +519,7 @@ with the severity. That is a testability choice as much as a physical one — a
 rate that varied with the quality would have no closed form to check against.
 
 **No presets.** Every other recent plugin in the fleet ships a preset table and
-the machinery that keeps a host from un-setting it. Nineteen controls in four
+the machinery that keeps a host from un-setting it. Twenty-one controls in four
 groups did not seem to need one, and the preset machinery is the single largest
 source of host-behaviour assumptions in the fleet. It can be added later without
 moving anything.
@@ -439,13 +563,40 @@ moving anything.
   rasters with no padding, for the stated reason. Overlay with no key is Src
   bitwise; Dissolve reaches both ends bitwise. At an unmatched raster it is a
   resample and no claim is made.
-- **No dead controls.** All **19** sweepable parameters measurably change the
-  picture; the other four are the About buttons, which `tools/sweep.py` skips.
+- **Amiga Mode scales what it should and nothing else**, at 640×360 and 320×180
+  (2026-09-23): the crawl's speed across the picture is bit-identical in all
+  three modes (rate/width for 40 settings; the plugin's reduced phase over 24
+  frames; and the frames themselves, byte for byte), and each mode's key edge
+  follows the lores physics to 0.0083 / 0.0619 texels. Key Delay −8 moves the
+  key −16.0024, −8.0024 and −4.0024 texels at 640 (predicted −16, −8, −4), and
+  hires at −8 is lores at −4 byte for byte. The tear throws −28.13 texels at 640
+  in every mode, and the torn frames are identical. Each with a shipped
+  negative control that fails in the picture.
+- **Crawl Wrap wraps where it says**: 4 pixels of the mode, 3 wraps (lores) and 6
+  (hires) in 60 frames as predicted, the key reaching within one frame's travel
+  of the wrap before it snaps, the phase exactly the closed form.
+- **The defaults are the old plugin.** The reduced crawl and delay match the
+  pre-feature formula bit for bit over 60 frames. And, once, by hand: cf17b14's
+  own `gltest` (built from `git archive`) and this one rendered **byte-identical
+  PNGs** for eight scenes — defaults at 1280×720 and 30 frames, a fast crawl, the
+  fastest crawl at 320×180, Key Delay −8, a rolling overlay, the edge card, and a
+  dissolving torn overlay — while Crawl Wrap 16 and Amiga Mode Hires both
+  differed. That comparison is not in the harness (it needs the old binary);
+  `--defaults` is its standing proxy.
+- **A one-character mutation of the shipped GLSL fails a check** (`--mutation`).
+- **No dead controls.** All **21** sweepable parameters measurably change the
+  picture, at 480×270 and at CI's 320×180; the other four are the About buttons,
+  which `tools/sweep.py` skips.
+- **The load-time log line works in a real `dlopen`**: `oxbow probe` loads the
+  bundle and the log says `loaded from .../Genlock.bundle/Contents/MacOS/Genlock`
+  — `verify.sh` asserts it. That is the only one of the new log lines that has
+  been exercised by anything but the harness.
 - **The build is universal and exports `plugMain`** — `lipo` reports
   `x86_64 arm64`, `nm -gU` finds `_plugMain`, the plist names a binary that
   exists, and it ad-hoc signs.
-- **A host sees `SW Genlock` / `GL01` / mixer / inputs 2..2** through
-  `oxbow probe`.
+- **A host sees `SW Genlock` / `GL01` / mixer / inputs 2..2 / 25 params**
+  through `oxbow probe`, with Amiga Mode at index 7 and Crawl Wrap at 11 in the
+  Timing group.
 - **The render cost**, by `gltest --bench` (120 frames each, after a 20-frame
   warm-up, `glFinish` on both sides):
 
@@ -471,6 +622,15 @@ moving anything.
   context. Every mixer-specific claim about the *host* — that Resolume reads
   mixers from Extra Mixers, that it binds `Opacity`, that it calls a mixer with
   one input while patching, that it drives a mixer's `SetTime` — is unverified.
+  The log is now built to answer each of them; nobody has read one from Arena.
+- **Hires and superhires are arithmetic, not observation.** The model — pixel
+  clocks scale, time errors do not — is argued in `Controls.h` and measured
+  against itself here. Nobody has put a hires Workbench through a real genlock
+  and compared, and whether a composite-rate genlock's fringe in superhires is
+  anything like a quarter of the lores one is exactly the kind of question the
+  real bandwidth would answer differently.
+- **The Crawl Wrap ceiling of 16 is a derivation from the burst's length**, not
+  a measurement of how far any genlock lets the phase go before it drops lock.
 - **Never run on another rasteriser.** See "Every number in the harness". The
   tolerances are derived from the GL spec rather than fitted, and the whole
   point of that was to survive llvmpipe, but nothing has proved it.
@@ -493,6 +653,39 @@ moving anything.
 
 ---
 
+## Reading the log after an Arena run
+
+The plugin writes one file, `~/Library/Logs/genlock/genlock.YYYY-MM-DD.log`
+(`%LOCALAPPDATA%\genlock\logs\` on Windows). Everything below was added so
+that **one session in front of Arena** answers the open questions about mixers.
+None of it changes a pixel, and none of it has been read from Arena yet.
+
+Before the session: run nothing from the harness without `GENLOCK_LOG_DIR`
+pointing elsewhere, or move the day's log aside — harness lines say `loaded from
+.../gltest` and are noise here. Install with `cmake --install build`, start
+Arena, put the mixer on a layer as its transition, crossfade by hand and by
+autopilot, patch and unpatch the layer below, quit.
+
+| Line | What it answers |
+|---|---|
+| `plugin loaded build=…` then `loaded from <path>` | Written at **load time**, from a file-scope constructor, before any instance exists. Its presence says Arena scanned the folder and `dlopen`ed the bundle; the path says **which** folder — the Extra Mixers question. No file at all means Arena never looked there. This line and nothing after it means it loaded the file and never instantiated it. |
+| `instance created` | A plugin object exists. Hosts often make one at scan time to read the parameters, so one of these alone is not "the operator chose it". |
+| `host <name> version <v>` | `SetHostInfo`: makes the log evidence about a known Arena build, not about "Resolume". |
+| `SetSampleRate <n>` | Whether a host sends a mixer the audio rate. |
+| `GL vendor=…` / `initialised, viewport WxH` | `InitGL` ran — the mixer was really put in a layer — and at what size. |
+| `guard: called with 1 input(s) -- returned FF_FAIL (logged once)` | **Whether Resolume calls a mixer with one input while patching**, the SDK example's claim. Also `no input array`, `a null Dest`/`Src`, `a zero-sized …`. Each is logged the first time only. Its absence after patching and unpatching is also an answer. |
+| `first SetTime <t> (before frame n)` | That the host calls `SetTime` on a mixer at all, and whether before the first frame. |
+| `clock at frame 1 / frame 300 / DeInitGL: SetTime called|NEVER called (N calls, last t), unit seconds|milliseconds|undecided, votes s=… ms=…, elapsed …` | **Whether Resolume drives a mixer's clock**, and in which unit. `NEVER called` means the crawl and roll ran on the wall clock (right rate, wrong origin). `undecided` at frame 300 means the host's clock did not advance like a clock for four frames in five seconds — paused, or looping. |
+| `first frame: Dest WxH of HWxHH, Src …` | What sizes and paddings a mixer's two inputs really arrive at — the case the two MaxUVs exist for. |
+| `first SetBeatInfo bpm … bar phase …`, and `… SetBeatInfo calls` at DeInitGL | Whether a mixer gets the transport. |
+| `Opacity <v> at frame <n>` (the first 16 changes) | **Whether Resolume binds a parameter named `Opacity` to the transition.** If these lines appear while the layer's crossfader or autopilot moves and nobody touched the slider, it binds. If they appear only when the slider is dragged, it does not. |
+| `DeInitGL after N frames, …` | The instance's life, and the clock's final state. |
+
+Where a line's answer changes a claim in this file, change the claim, date it,
+and say it came from the log.
+
+---
+
 ## Open questions
 
 1. **Does Resolume drive the fader?** If it binds `Opacity` to the layer's
@@ -505,13 +698,14 @@ moving anything.
 3. **Is a genlock usable as a transition?** Resolume's mixers are chosen per
    layer as transitions. A genlock is not a crossfade, and what an autopilot
    sweeping `Opacity` through it looks like is unknown.
-4. **Should the crawl wrap be an operator control?** It is fixed at one Amiga
-   pixel, which is the physical answer for a genlock that re-locks every line.
-   A genlock with a worse line sync would let more accumulate, and that is a
-   real difference in look with no slider.
-5. **Should `Key Delay` scale with a chosen Amiga mode?** Lores is assumed. A
-   hires overlay has half-width pixels, so the same nominal delay is half the
-   fringe. One dropdown would cover it.
+4. ~~Should the crawl wrap be an operator control?~~ **Done, 2026-09-23:**
+   `Crawl Wrap`, 1 to 16 pixels of the mode, default 1.
+5. ~~Should `Key Delay` scale with a chosen Amiga mode?~~ **Done, 2026-09-23:**
+   `Amiga Mode`, and it does. What is still open is whether the result looks
+   like a real hires genlock at all — see "Assumed".
+6. **NTSC.** Still PAL throughout. An NTSC Amiga's lores clock is 7.15909 MHz
+   and its burst is nine cycles, so both the crawl rate and the Crawl Wrap
+   ceiling would move. A second dropdown, not attempted.
 
 ---
 
