@@ -101,6 +101,18 @@ the transition list), so set the upper layer's Blend Mode to SW Genlock.
 User guide: [docs/USER-GUIDE.md](docs/USER-GUIDE.md), also at
 https://stoatworks-labs.com/software/genlock/guide/
 
+[![Genlock — an Amiga-style genlock, flaws and all, as a Resolume mixer](docs/video-thumb.png)](https://www.youtube.com/watch?v=g_ieK_B1WiU)
+
+*[Watch it](https://www.youtube.com/watch?v=g_ieK_B1WiU) — 52 seconds: colour
+0 keyed out to show the video, Key Delay spilling colour 0 one side and
+cutting video in on the other, the fringe crawling on a clock a few ppm off,
+Amiga Mode's lores, hires and superhires, the overlay losing lock and rolling,
+and the three-position fader. Every frame is the real plugin's output: an FFGL
+plugin has no window, so the footage is rendered by this repository's own
+offline harness (`gltest --pipe`, driven by a cue sheet) rather than filmed
+off a screen; the video is Resolume's bundled demo media and the overlay is
+drawn by the render script.*
+
 ## The controls
 
 **Key** — Key Source (Colour 0, Luma or Alpha), Key Colour as a swatch (the
