@@ -100,14 +100,16 @@ git clone --recursive https://github.com/stoatworks-labs/genlock
 cd genlock
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-cmake --install build    # → ~/Documents/Resolume Arena/Extra Mixers
+cmake --install build    # → ~/Documents/Resolume Arena/Extra Effects
 ```
 
 macOS builds universal (arm64 + x86_64) by default. Add
 `-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
 
-The install path is **Extra Mixers**, not Extra Effects. That is an assumption
-about how Resolume separates the two, and it is untested.
+The install path is **Extra Effects**, although this is a mixer. Resolume has one
+FFGL folder, and sources, effects and mixers all load from it: Arena 7's binary
+names no other, and the FFGL SDK sends its own mixer example there. (Before
+v0.1.0 this said `Extra Mixers`, which Arena never reads.)
 
 ## Building and testing
 
@@ -170,8 +172,7 @@ Run `tools/verify.sh` before believing any of it.
 
 **Not done, and the honest list is long.** It has **never been loaded into
 Resolume** — not on macOS, not on Windows, not once — so every mixer-specific
-claim about the *host* is a guess: that Resolume reads mixers from Extra Mixers,
-that it binds a parameter named `Opacity` to the transition position (the SDK's
+claim about the *host* is a guess: that it binds a parameter named `Opacity` to the transition position (the SDK's
 own example says it does, which is why the master blend carries that name
 instead of the `Mix` it would otherwise have), that it calls a mixer with one
 input while the operator is patching, and that it drives a mixer's clock at all.

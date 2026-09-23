@@ -127,12 +127,14 @@ genlock_add_plugin(Genlock source/PluginEntry.cpp
 # `cmake --install build` drops the bundle where Arena reads it. Avenue reads
 # ~/Documents/Resolume Avenue/Extra Effects instead; pass --prefix for that.
 #
-# A MIXER is not an effect and Resolume does not read it from Extra Effects --
-# it reads mixers from "Extra Mixers" beside it. That folder is the one
-# difference in the install path between this repo and the other forty-four,
-# and it is untested: nothing here has been in front of Resolume.
+# A mixer goes in Extra Effects like every other FFGL plugin. This said
+# "Extra Mixers" until v0.1.0, on the assumption that Resolume keeps mixers
+# apart; it does not. Arena 7's binary names exactly one FFGL folder, "Extra
+# Effects", and no "Extra Mixers" anywhere, and the FFGL SDK's own README
+# sends every plugin type -- its Add mixer example included -- to Extra
+# Effects. An install to Extra Mixers would have installed nothing Arena sees.
 if(APPLE AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/Documents/Resolume Arena/Extra Mixers"
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/Documents/Resolume Arena/Extra Effects"
         CACHE PATH "" FORCE)
 endif()
 install(TARGETS Genlock

@@ -177,9 +177,13 @@ nothing here has been in front of Resolume.
 
 ### Things still unknown about mixers
 
-- **Where Resolume reads them from.** The install prefix here is
-  `~/Documents/Resolume Arena/Extra Mixers` rather than `Extra Effects`, on the
-  assumption that Resolume separates them. Untested.
+- **Where Resolume reads them from: Extra Effects, the same folder as every
+  other FFGL plugin.** This said `Extra Mixers` until the v0.1.0 release, on the
+  assumption that Resolume keeps mixers apart. Checked at release: the Arena 7
+  binary on the release Mac contains the string `Extra Effects` and an
+  `FFGLMixer` class, and no `Extra Mixers` anywhere; the FFGL SDK's README sends
+  every plugin -- its `Add` mixer example included -- to Extra Effects. An
+  install to Extra Mixers would have put the bundle where Arena never looks.
 - **Whether Resolume binds a parameter by name.** `Add`'s comment says in as
   many words that "Resolume will look for a param named `Opacity` for mix
   value", and `ffglqs::Mixer` declares its own under the name `mixVal`. That is
@@ -619,8 +623,7 @@ moving anything.
 
 - **Never loaded into Resolume.** Not once. Everything above was compiled,
   rendered and measured offline against the real plugin class in a headless CGL
-  context. Every mixer-specific claim about the *host* — that Resolume reads
-  mixers from Extra Mixers, that it binds `Opacity`, that it calls a mixer with
+  context. Every mixer-specific claim about the *host* — that it binds `Opacity`, that it calls a mixer with
   one input while patching, that it drives a mixer's `SetTime` — is unverified.
   The log is now built to answer each of them; nobody has read one from Arena.
 - **Hires and superhires are arithmetic, not observation.** The model — pixel
@@ -693,8 +696,8 @@ and say it came from the log.
    right for a mixer and may be surprising. One session in front of Arena
    answers it, and the answer might move the master blend back to `Mix` with a
    separate `Opacity` beside it.
-2. **Is `Extra Mixers` the right folder?** If Resolume has no such concept the
-   install target is wrong and the plugin will not appear at all.
+2. ~~Is `Extra Mixers` the right folder?~~ **No, answered at release:**
+   Resolume has no such folder; mixers load from Extra Effects. See above.
 3. **Is a genlock usable as a transition?** Resolume's mixers are chosen per
    layer as transitions. A genlock is not a crossfade, and what an autopilot
    sweeping `Opacity` through it looks like is unknown.

@@ -12,9 +12,9 @@ behaves, and the reasoning behind every number `gltest` asserts.
 - Configure: `cmake -B build -DCMAKE_BUILD_TYPE=Release`
 - Fast dev build: add `-DCMAKE_OSX_ARCHITECTURES=arm64`
 - Build: `cmake --build build`
-- Install into Arena: `cmake --install build` → `~/Documents/Resolume Arena/Extra Mixers`
-  (**not** Extra Effects — this is a mixer. Untested: nothing here has been in
-  front of Resolume.)
+- Install into Arena: `cmake --install build` → `~/Documents/Resolume Arena/Extra Effects`
+  (yes, Extra Effects, although this is a mixer: Arena has one FFGL folder and
+  no `Extra Mixers`. See AGENTS.md.)
 - Render a frame offline: `./build/gltest --out /tmp/f.png --size 1920x1080`
 - Choose the two inputs: `--input-a video --input-b amiga`
   (a is **Dest**, the layer below; b is **Src**, this layer. Also `quads-a`,

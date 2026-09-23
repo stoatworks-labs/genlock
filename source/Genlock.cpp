@@ -47,7 +47,7 @@ static_assert( Genlock::PT_COUNT - Genlock::PT_ABOUT_FIRST == stoatworks::about:
 // and did not instantiate it" -- which is a different answer from no log at
 // all ("it never looked in that folder"), and the only way to tell the two
 // apart from inside the plugin. The path is the one the loader actually
-// resolved, which is what settles whether Extra Mixers is the right folder.
+// resolved -- which folder the host really scanned.
 //
 // Runs inside dlopen / DllMain. Diag::init does no fork, no exec and no
 // shell -- see createDirectories -- and its state is a function-local static,
