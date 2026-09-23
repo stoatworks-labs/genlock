@@ -174,6 +174,7 @@ hardware padding, rendered to an output that is a third size again.
     ./build/gltest --defaults               the new controls' defaults ARE the old behaviour
     ./build/gltest --mutation               one character of the shipped GLSL fails a check
     ./build/gltest --bench                  720p through 4K
+    ./build/gltest --pipe --pipe-src F      two raw RGBA streams in, frames out (filming, not a check)
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
 

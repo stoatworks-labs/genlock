@@ -20,6 +20,15 @@
         gltest --defaults               the new controls' defaults ARE the old behaviour
         gltest --mutation               a one-character GLSL mutation fails a check
         gltest --bench                  ms/frame at 720p through 4K
+        gltest --pipe                   raw frames in, raw frames out (two inputs)
+
+    `--pipe` is the fleet's frame format with a second input. stdin is Dest,
+    the layer below; `--pipe-src` is Src, this layer, from a file or FIFO:
+
+        ffmpeg -i video.mov -f rawvideo -pix_fmt rgba - \
+          | gltest --pipe --size 1920x1080 --pipe-src overlay.fifo \
+                   [--src-size WxH] [--script cues.txt] \
+          | ffmpeg -f rawvideo -pix_fmt rgba -s 1920x1080 -i - out.mov
 
     Every check renders through the REAL plugin class in a headless CGL
     context. There is no CPU mirror of the shader to drift: what is compared
@@ -58,7 +67,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 using namespace genlock;
@@ -2802,6 +2816,244 @@ int runBench( int frames, double fps )
 }
 
 //---------------------------------------------------------------------------
+// --pipe: the fleet's frame format, extended to a second input.
+//
+// Every other FFGL harness in the fleet takes one stream of raw RGBA frames,
+// top row first, on stdin and writes the processed frames to stdout, so one
+// filming script can drive any of them. A mixer has two inputs, so:
+//
+//   * stdin is DEST, inputTextures[0], the layer below -- the incoming video.
+//     Output-sized, exactly as in the one-input harnesses.
+//   * `--pipe-src PATH` is SRC, inputTextures[1], this layer -- the
+//     computer's picture. Raw RGBA frames, top row first, at `--src-size`
+//     (default: the output size). PATH may be a FIFO. Without it, the
+//     `--input-b` generator is uploaded once and held.
+//
+// One frame of each is read per output frame; the run ends when either
+// stream does. The clock is synthetic -- frame / fps -- because the crawl and
+// the roll run on it and a wall clock would make every take different.
+//
+// This is a filming mode, not a check. It asserts nothing, and no check
+// calls it.
+//---------------------------------------------------------------------------
+using Track = std::vector< std::pair< int, float > >;
+
+/// One 'frame Parameter Name value' per line, '#' to end of line is a
+/// comment. The same format as the rest of the fleet.
+std::map< std::string, Track > loadScript( const std::string& path, std::string& error )
+{
+	std::map< std::string, Track > tracks;
+	std::ifstream file( path );
+	if( !file )
+	{
+		error = "cannot open " + path;
+		return tracks;
+	}
+
+	std::string line;
+	int lineNumber = 0;
+	while( std::getline( file, line ) )
+	{
+		++lineNumber;
+		const size_t hash = line.find( '#' );
+		if( hash != std::string::npos )
+			line.erase( hash );
+		std::istringstream in( line );
+
+		int frame = 0;
+		if( !( in >> frame ) )
+			continue;
+
+		std::vector< std::string > words;
+		std::string word;
+		while( in >> word )
+			words.push_back( word );
+		if( words.size() < 2 )
+		{
+			error = path + ":" + std::to_string( lineNumber ) + ": expected `frame Parameter Name value`";
+			return {};
+		}
+
+		const float value = std::strtof( words.back().c_str(), nullptr );
+		words.pop_back();
+		std::string name = words.front();
+		for( size_t i = 1; i < words.size(); ++i )
+			name += " " + words[ i ];
+
+		tracks[ name ].emplace_back( frame, value );
+	}
+
+	for( auto& entry : tracks )
+		std::sort( entry.second.begin(), entry.second.end() );
+	return tracks;
+}
+
+/// Linear between keys; the first key holds before it, the last after it.
+float valueAt( const Track& track, int frame )
+{
+	if( track.empty() )
+		return 0.0f;
+	if( frame <= track.front().first )
+		return track.front().second;
+	if( frame >= track.back().first )
+		return track.back().second;
+
+	for( size_t i = 1; i < track.size(); ++i )
+	{
+		if( frame <= track[ i ].first )
+		{
+			const auto& a    = track[ i - 1 ];
+			const auto& b    = track[ i ];
+			const float span = static_cast< float >( b.first - a.first );
+			const float t    = span > 0.0f ? ( static_cast< float >( frame - a.first ) / span ) : 1.0f;
+			return a.second + ( b.second - a.second ) * t;
+		}
+	}
+	return track.back().second;
+}
+
+/// Fill `frame` from `fd`. False on a short read, which is the end of the
+/// stream rather than an error.
+bool readFrame( int fd, Image& frame )
+{
+	size_t filled = 0;
+	while( filled < frame.size() )
+	{
+		const ssize_t got = read( fd, frame.data() + filled, frame.size() - filled );
+		if( got <= 0 )
+			return false;
+		filled += static_cast< size_t >( got );
+	}
+	return true;
+}
+
+bool writeAll( int fd, const Image& frame )
+{
+	size_t written = 0;
+	while( written < frame.size() )
+	{
+		const ssize_t put_ = write( fd, frame.data() + written, frame.size() - written );
+		if( put_ <= 0 )
+			return false;
+		written += static_cast< size_t >( put_ );
+	}
+	return true;
+}
+
+/// Top row first to bottom row first, or back: the same operation.
+void flipRows( const Image& in, Image& out, int width, int height )
+{
+	const size_t row = static_cast< size_t >( width ) * 4;
+	for( int y = 0; y < height; ++y )
+		std::memcpy( out.data() + static_cast< size_t >( height - 1 - y ) * row, in.data() + static_cast< size_t >( y ) * row, row );
+}
+
+int runPipe( int width, int height, int srcWidth, int srcHeight, double fps, const std::string& scriptPath,
+             const std::string& srcPath, const std::string& inputB, const std::vector< std::string >& settings )
+{
+	Rig rig;
+	if( !rig.Init( width, height, InputSpec::Exact( width, height ), InputSpec::Exact( srcWidth, srcHeight ) ) )
+		return 1;
+
+	for( const std::string& setting : settings )
+	{
+		const size_t equals = setting.find( '=' );
+		if( equals == std::string::npos
+		    || !rig.Set( setting.substr( 0, equals ), std::strtof( setting.substr( equals + 1 ).c_str(), nullptr ) ) )
+		{
+			std::fprintf( stderr, "--set %s: expected Name=Value with a known name (try --list)\n", setting.c_str() );
+			return 2;
+		}
+	}
+
+	//Resolve the script's names up front and refuse an unknown one: a
+	//misspelled cue that silently did nothing would produce a take that
+	//looks deliberate and is wrong.
+	std::map< unsigned int, Track > automation;
+	if( !scriptPath.empty() )
+	{
+		std::string error;
+		const std::map< std::string, Track > tracks = loadScript( scriptPath, error );
+		if( !error.empty() )
+		{
+			std::fprintf( stderr, "%s\n", error.c_str() );
+			return 2;
+		}
+		for( const auto& entry : tracks )
+		{
+			bool found = false;
+			for( unsigned int id = 0; id < Genlock::PT_COUNT; ++id )
+			{
+				const char* name = rig.plugin.GetParamName( id );
+				if( name != nullptr && entry.first == name )
+				{
+					automation[ id ] = entry.second;
+					found            = true;
+					break;
+				}
+			}
+			if( !found )
+			{
+				std::fprintf( stderr, "script names '%s', which is not a parameter (try --list)\n", entry.first.c_str() );
+				return 2;
+			}
+		}
+	}
+
+	int srcFd = -1;
+	if( !srcPath.empty() )
+	{
+		srcFd = open( srcPath.c_str(), O_RDONLY );
+		if( srcFd < 0 )
+		{
+			std::fprintf( stderr, "cannot open --pipe-src %s\n", srcPath.c_str() );
+			return 2;
+		}
+	}
+	else
+		rig.UploadSrc( generate( inputB, srcWidth, srcHeight ) );
+
+	Image destIn( static_cast< size_t >( width ) * height * 4 ), destUp( destIn.size() );
+	Image srcIn( static_cast< size_t >( srcWidth ) * srcHeight * 4 ), srcUp( srcIn.size() );
+	Image out( destIn.size() );
+
+	int index = 0;
+	for( ;; ++index )
+	{
+		if( !readFrame( STDIN_FILENO, destIn ) )
+			break;
+		if( srcFd >= 0 )
+		{
+			if( !readFrame( srcFd, srcIn ) )
+				break;
+			flipRows( srcIn, srcUp, srcWidth, srcHeight );
+			rig.UploadSrc( srcUp );
+		}
+		flipRows( destIn, destUp, width, height );
+		rig.UploadDest( destUp );
+
+		for( const auto& track : automation )
+			rig.plugin.SetFloatParameter( track.first, valueAt( track.second, index ) );
+
+		if( !rig.Render( index, fps ) )
+		{
+			std::fprintf( stderr, "ProcessOpenGL failed at frame %d\n", index );
+			if( srcFd >= 0 )
+				close( srcFd );
+			return 1;
+		}
+		flipRows( rig.Pixels(), out, width, height );
+		if( !writeAll( STDOUT_FILENO, out ) )
+			break;
+	}
+
+	if( srcFd >= 0 )
+		close( srcFd );
+	std::fprintf( stderr, "gltest --pipe: %d frames\n", index );
+	return 0;
+}
+
+//---------------------------------------------------------------------------
 void usage()
 {
 	std::printf(
@@ -2827,6 +3079,10 @@ void usage()
 		"  --defaults        the new controls' defaults reproduce the old behaviour exactly\n"
 		"  --mutation        one character of the shipped GLSL, changed, fails a check\n"
 		"  --bench           time ProcessOpenGL at 720p through 4K\n"
+		"  --pipe            raw RGBA Dest frames on stdin, raw RGBA frames on stdout\n"
+		"  --pipe-src PATH   raw RGBA Src frames for --pipe (a file or FIFO); default: --input-b, held\n"
+		"  --src-size WxH    the Src frames' size for --pipe (default: the output size)\n"
+		"  --script PATH     parameter cues for --pipe: 'frame Name value'\n"
 		"  --help\n" );
 }
 } // namespace
@@ -2840,7 +3096,9 @@ int main( int argc, char** argv )
 	int width = 1280, height = 720;
 	int frames  = 1;
 	double fps  = 60.0;
-	bool wantList = false, wantBench = false;
+	bool wantList = false, wantBench = false, wantPipe = false;
+	std::string scriptPath, srcPath;
+	int srcWidth = 0, srcHeight = 0;
 	std::string check;
 	std::vector< std::string > settings;
 
@@ -2888,6 +3146,24 @@ int main( int argc, char** argv )
 			wantList = true;
 		else if( argument == "--bench" )
 			wantBench = true;
+		else if( argument == "--pipe" )
+			wantPipe = true;
+		else if( argument == "--pipe-src" && hasNext )
+			srcPath = argv[ ++i ];
+		else if( argument == "--script" && hasNext )
+			scriptPath = argv[ ++i ];
+		else if( argument == "--src-size" && hasNext )
+		{
+			const std::string size = argv[ ++i ];
+			const size_t x         = size.find( 'x' );
+			if( x == std::string::npos )
+			{
+				std::fprintf( stderr, "--src-size wants WxH\n" );
+				return 2;
+			}
+			srcWidth  = std::atoi( size.substr( 0, x ).c_str() );
+			srcHeight = std::atoi( size.substr( x + 1 ).c_str() );
+		}
 		else if( argument == "--names" || argument == "--mixer" || argument == "--delay"
 		         || argument == "--crawl" || argument == "--roll" || argument == "--fader" || argument == "--modes"
 		         || argument == "--defaults" || argument == "--mutation" )
@@ -2949,6 +3225,9 @@ int main( int argc, char** argv )
 		result = runMutation();
 	else if( wantBench )
 		result = runBench( frames > 1 ? frames : 60, fps );
+	else if( wantPipe )
+		result = runPipe( width, height, srcWidth > 0 ? srcWidth : width, srcHeight > 0 ? srcHeight : height, fps,
+		                  scriptPath, srcPath, inputB, settings );
 	else
 	{
 		Rig rig;
