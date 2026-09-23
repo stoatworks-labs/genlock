@@ -37,4 +37,15 @@ void error( const std::string& message );
 /// Full path of the log file, for the README to point at.
 std::string logPath();
 
+/// The file this code is running out of: the bundle or DLL the host actually
+/// loaded, not the place the build put it and not the place the installer was
+/// told to use.
+///
+/// It is the only way to answer "did Resolume read this out of Extra Mixers?"
+/// from inside the plugin, and it is written at LOAD time rather than at
+/// instantiation -- a host that scans the folder, reads the plugin's name and
+/// then never offers it to the operator leaves a log with this line and
+/// nothing after it, which is a different answer from an empty folder.
+std::string modulePath();
+
 } // namespace genlock::diag

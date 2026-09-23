@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 using namespace ffglex;
@@ -37,6 +38,35 @@ static CFFGLPluginInfo PluginInfo(
 static_assert( Genlock::PT_COUNT - Genlock::PT_ABOUT_FIRST == stoatworks::about::kParamCount,
                "the About block's size changed with the generated header" );
 
+//---------------------------------------------------------------------------
+// One log line at LOAD time, before any instance exists.
+//
+// A host that scans the plugin folder dlopens every bundle in it and reads
+// its info, whether or not it ever offers the plugin to the operator. So a
+// log holding this line and nothing after it says "Resolume found the file
+// and did not instantiate it" -- which is a different answer from no log at
+// all ("it never looked in that folder"), and the only way to tell the two
+// apart from inside the plugin. The path is the one the loader actually
+// resolved, which is what settles whether Extra Mixers is the right folder.
+//
+// Runs inside dlopen / DllMain. Diag::init does no fork, no exec and no
+// shell -- see createDirectories -- and its state is a function-local static,
+// so the order this object is constructed in relative to Diag.cpp's does
+// not matter.
+//---------------------------------------------------------------------------
+namespace
+{
+struct LoadTimeLog
+{
+	LoadTimeLog()
+	{
+		genlock::diag::init();
+		genlock::diag::info( "loaded from " + genlock::diag::modulePath() );
+	}
+};
+const LoadTimeLog g_loadTimeLog;
+} // namespace
+
 namespace
 {
 /// glGetString returns nullptr when there is no current context, and feeding
@@ -53,6 +83,13 @@ const char* const kFaderNames[]     = { "Video", "Overlay", "Dissolve" };
 
 static_assert( sizeof( kAmigaModeNames ) / sizeof( kAmigaModeNames[ 0 ] ) == AM_COUNT,
                "one name per Amiga mode" );
+
+std::string number( double value )
+{
+	char buffer[ 64 ];
+	std::snprintf( buffer, sizeof( buffer ), "%.6g", value );
+	return buffer;
+}
 
 int optionIndex( float value, int count )
 {
@@ -172,6 +209,7 @@ Genlock::Genlock()
 	FFGLLog::LogToHost( "Created Genlock mixer" );
 
 	diag::init();
+	diag::info( "instance created" );
 }
 
 //---------------------------------------------------------------------------
@@ -199,7 +237,7 @@ FFResult Genlock::InitGL( const FFGLViewportStruct* vp )
 		return FF_FAIL;
 	}
 
-	diag::info( "initialised" );
+	diag::info( "initialised, viewport " + number( vp ? vp->width : 0 ) + "x" + number( vp ? vp->height : 0 ) );
 
 	//Use base-class init as the success result so it retains the viewport.
 	return CFFGLPlugin::InitGL( vp );
@@ -214,12 +252,25 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	//here -- but it costs four comparisons to believe it, and a mixer that
 	//dereferenced a null would take Resolume down with it. Every check
 	//before anything is read.
+	//
+	//Each guard logs the FIRST time it fires, and only then: whether a host
+	//really does this, and which way, is one of the open questions about
+	//mixers, and a host that does it on every frame while patching must
+	//not fill the disk answering it.
+	const auto guard = [ this ]( unsigned bit, const std::string& what ) {
+		if( ( logState.guardsLogged & ( 1u << bit ) ) == 0 )
+		{
+			logState.guardsLogged |= 1u << bit;
+			diag::warn( "guard: " + what + " -- returned FF_FAIL (logged once)" );
+		}
+		return FF_FAIL;
+	};
 	if( pGL == nullptr || pGL->inputTextures == nullptr )
-		return FF_FAIL;
+		return guard( 0, "no input array" );
 	if( pGL->numInputTextures < 2 )
-		return FF_FAIL;
+		return guard( 1, "called with " + number( pGL->numInputTextures ) + " input(s)" );
 	if( pGL->inputTextures[ 0 ] == nullptr || pGL->inputTextures[ 1 ] == nullptr )
-		return FF_FAIL;
+		return guard( 2, std::string( "a null " ) + ( pGL->inputTextures[ 0 ] == nullptr ? "Dest" : "Src" ) );
 
 	const FFGLTextureStruct& dest = *pGL->inputTextures[ 0 ];//the layer below
 	const FFGLTextureStruct& src  = *pGL->inputTextures[ 1 ];//this layer
@@ -227,9 +278,21 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	//GetMaxGLTexCoords, so a zero there is an infinite MaxUV rather than a
 	//small picture.
 	if( dest.Width == 0 || dest.Height == 0 || dest.HardwareWidth == 0 || dest.HardwareHeight == 0 )
-		return FF_FAIL;
+		return guard( 3, "a zero-sized Dest" );
 	if( src.Width == 0 || src.Height == 0 || src.HardwareWidth == 0 || src.HardwareHeight == 0 )
-		return FF_FAIL;
+		return guard( 3, "a zero-sized Src" );
+
+	//The first frame's two inputs, as the host handed them: whether a mixer
+	//really is given two different sizes, and with what padding, is the
+	//case the two MaxUVs exist for.
+	if( logState.frames == 0 )
+	{
+		const auto describe = []( const FFGLTextureStruct& t ) {
+			return number( t.Width ) + "x" + number( t.Height ) + " of " + number( t.HardwareWidth ) + "x"
+			       + number( t.HardwareHeight );
+		};
+		diag::info( "first frame: Dest " + describe( dest ) + ", Src " + describe( src ) );
+	}
 
 	//-----------------------------------------------------------------
 	// The two clocks. Everything the shader is handed is already reduced
@@ -277,6 +340,15 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	lastTimings.rollPhase        = roll;
 	lastTimings.amigaMode        = mode;
 	lastTimings.locked           = locked;
+
+	//Whether the host drives a MIXER's clock at all: once on the first
+	//frame, and again five seconds in at 60 fps, by which time the unit vote
+	//has had every chance to settle.
+	++logState.frames;
+	if( logState.frames == 1 )
+		logClock( "frame 1" );
+	else if( logState.frames == 300 )
+		logClock( "frame 300" );
 
 	//-----------------------------------------------------------------
 	// Bind both inputs.
@@ -333,6 +405,18 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	shader.Set( "EdgeTint", params[ PT_TINT_R ], params[ PT_TINT_G ], params[ PT_TINT_B ] );
 	shader.Set( "Opacity", std::clamp( params[ PT_OPACITY ], 0.0f, 1.0f ) );
 
+	//Whether Resolume binds a parameter called Opacity to the transition.
+	//If it does, this moves with the layer's crossfader without the operator
+	//touching the slider. The first sixteen changes of more than a hundredth,
+	//and then silence.
+	const float opacity = params[ PT_OPACITY ];
+	if( logState.opacityLines < 16 && std::fabs( opacity - logState.lastOpacity ) > 0.01f )
+	{
+		diag::info( "Opacity " + number( opacity ) + " at frame " + number( static_cast< double >( logState.frames ) )
+		            + ( ++logState.opacityLines == 16 ? " (the last Opacity line)" : "" ) );
+		logState.lastOpacity = opacity;
+	}
+
 	quad.Draw();
 
 	return FF_SUCCESS;
@@ -341,6 +425,12 @@ FFResult Genlock::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 //---------------------------------------------------------------------------
 FFResult Genlock::DeInitGL()
 {
+	if( logState.frames > 0 )
+	{
+		logClock( "DeInitGL" );
+		diag::info( "DeInitGL after " + number( static_cast< double >( logState.frames ) ) + " frames, "
+		            + number( static_cast< double >( logState.beatCalls ) ) + " SetBeatInfo calls" );
+	}
 	shader.FreeGLResources();
 	quad.Release();
 	return FF_SUCCESS;
@@ -394,5 +484,48 @@ FFResult Genlock::SetTextParameter( unsigned int index, const char* value )
 FFResult Genlock::SetTime( double time )
 {
 	clock.Observe( time );
+	++logState.timeCalls;
+	if( !logState.firstTimeLogged )
+	{
+		logState.firstTimeLogged = true;
+		diag::info( "first SetTime " + number( time ) + " (before frame " + number( static_cast< double >( logState.frames + 1 ) ) + ")" );
+	}
 	return FF_SUCCESS;
+}
+
+//---------------------------------------------------------------------------
+// Diagnostics only. None of these changes a pixel -- see Genlock.h.
+//---------------------------------------------------------------------------
+void Genlock::logClock( const char* when )
+{
+	int seconds = 0, millis = 0;
+	clock.Votes( seconds, millis );
+	const double scale = clock.Scale();
+	diag::info( std::string( "clock at " ) + when + ": SetTime " + ( clock.Observed() ? "called" : "NEVER called" )
+	            + " (" + number( static_cast< double >( logState.timeCalls ) ) + " calls, last " + number( clock.Raw() )
+	            + "), unit " + ( scale == 1.0 ? "seconds" : scale == 0.001 ? "milliseconds" : "undecided" )
+	            + ", votes s=" + number( seconds ) + " ms=" + number( millis )
+	            + ", elapsed " + number( clock.Elapsed() ) + " s" );
+}
+
+void Genlock::SetHostInfo( const char* hostname, const char* version )
+{
+	CFFGLPlugin::SetHostInfo( hostname, version );
+	diag::info( std::string( "host " ) + ( hostname ? hostname : "(null)" ) + " version "
+	            + ( version ? version : "(null)" ) );
+}
+
+void Genlock::SetBeatInfo( float bpm, float barPhase )
+{
+	CFFGLPlugin::SetBeatInfo( bpm, barPhase );
+	//Hosts send this every frame. The first one says the host sends it to a
+	//mixer at all; the count arrives at DeInitGL.
+	if( logState.beatCalls++ == 0 )
+		diag::info( "first SetBeatInfo bpm " + number( bpm ) + " bar phase " + number( barPhase ) );
+}
+
+void Genlock::SetSampleRate( unsigned int sampleRate )
+{
+	CFFGLPlugin::SetSampleRate( sampleRate );
+	diag::info( "SetSampleRate " + number( sampleRate ) );
 }

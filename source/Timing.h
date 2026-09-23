@@ -58,6 +58,27 @@ public:
 		return scale_;
 	}
 
+	/// Whether the host has ever called SetTime, and what it last said. Only
+	/// the diagnostics log reads these: whether a host drives a MIXER's clock
+	/// at all is one of the things about mixers nobody here has been able to
+	/// measure, and the log is where that gets answered.
+	bool Observed() const
+	{
+		return raw_ >= 0.0;
+	}
+
+	double Raw() const
+	{
+		return raw_;
+	}
+
+	/// How the unit vote stands, for the same reason.
+	void Votes( int& seconds, int& millis ) const
+	{
+		seconds = secondsVotes_;
+		millis  = millisVotes_;
+	}
+
 private:
 	double raw_        = -1.0;///< the host's last reading, in the host's unit
 	double lastRaw_    = -1.0;

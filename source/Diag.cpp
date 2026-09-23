@@ -7,6 +7,9 @@
 
 #if defined( _WIN32 )
 	#include <windows.h>
+#else
+	#include <dlfcn.h>
+	#include <sys/stat.h>
 #endif
 
 namespace genlock::diag
@@ -15,9 +18,26 @@ namespace
 {
 constexpr const char* kAppName = "genlock";
 
-std::mutex g_mutex;
-std::string g_path;
-bool g_ready = false;
+/// The log's state, behind a function rather than at file scope.
+///
+/// init() is now called from a file-scope constructor in Genlock.cpp, at
+/// load time, and C++ says nothing about the order two translation units'
+/// file-scope objects are constructed in. A file-scope std::string here could
+/// be constructed AFTER Genlock.cpp had already written the path into it,
+/// resetting it to empty and leaving every later line unwritten. A
+/// function-local static is constructed on first use, whoever uses it first.
+struct State
+{
+	std::mutex mutex;
+	std::string path;
+	bool ready = false;
+};
+
+State& state()
+{
+	static State s;
+	return s;
+}
 
 std::string environmentVariable( const char* name )
 {
@@ -55,6 +75,15 @@ std::string logDirectory()
 #endif
 }
 
+/// Make the log directory, WITHOUT a shell.
+///
+/// This used to be `std::system( "mkdir -p ..." )`, which was harmless while
+/// it only ran when a plugin instance was created. It is now also reached
+/// from a file-scope constructor -- i.e. from inside dlopen, on whichever of
+/// the host's threads is scanning the plugin folder -- and fork() from there
+/// can inherit a malloc lock held by another thread and hang the child before
+/// it ever reaches exec. mkdir() is a syscall and has no such problem. It is
+/// also the end of quoting a path into a shell command.
 void createDirectories( const std::string& path )
 {
 #if defined( _WIN32 )
@@ -67,8 +96,14 @@ void createDirectories( const std::string& path )
 	}
 	CreateDirectoryA( path.c_str(), nullptr );
 #else
-	std::string command = "mkdir -p '" + path + "'";
-	(void)std::system( command.c_str() );
+	std::string partial;
+	for( size_t i = 0; i < path.size(); ++i )
+	{
+		partial += path[ i ];
+		if( path[ i ] == '/' && partial.size() > 1 )
+			(void)::mkdir( partial.c_str(), 0755 );
+	}
+	(void)::mkdir( path.c_str(), 0755 );
 #endif
 }
 
@@ -88,15 +123,16 @@ std::string timestamp( const char* format )
 
 void write( const char* level, const std::string& message )
 {
-	std::lock_guard<std::mutex> lock( g_mutex );
-	if( !g_ready )
+	State& s = state();
+	std::lock_guard<std::mutex> lock( s.mutex );
+	if( !s.ready )
 		return;
 
 	// Opened and closed per line rather than held open. An effect logs a
 	// handful of lines per session, and a plugin holding a file handle open
 	// for the life of the host is a worse trade than the open() cost. It also
 	// means nothing is buffered when the host exits.
-	std::ofstream file( g_path, std::ios::app );
+	std::ofstream file( s.path, std::ios::app );
 	if( !file )
 		return;
 	file << timestamp( "%Y-%m-%dT%H:%M:%S" ) << " " << level << " " << kAppName << ": " << message
@@ -107,18 +143,19 @@ void write( const char* level, const std::string& message )
 void init()
 {
 	{
-		std::lock_guard<std::mutex> lock( g_mutex );
-		if( g_ready )
+		State& s = state();
+		std::lock_guard<std::mutex> lock( s.mutex );
+		if( s.ready )
 			return;
 
 		const std::string directory = logDirectory();
 		createDirectories( directory );
 #if defined( _WIN32 )
-		g_path = directory + "\\" + kAppName + "." + timestamp( "%Y-%m-%d" ) + ".log";
+		s.path = directory + "\\" + kAppName + "." + timestamp( "%Y-%m-%d" ) + ".log";
 #else
-		g_path = directory + "/" + kAppName + "." + timestamp( "%Y-%m-%d" ) + ".log";
+		s.path = directory + "/" + kAppName + "." + timestamp( "%Y-%m-%d" ) + ".log";
 #endif
-		g_ready = true;
+		s.ready = true;
 	}
 
 	info( std::string( "plugin loaded build=" ) + __DATE__ + " " + __TIME__ );
@@ -141,8 +178,33 @@ void error( const std::string& message )
 
 std::string logPath()
 {
-	std::lock_guard<std::mutex> lock( g_mutex );
-	return g_path;
+	State& s = state();
+	std::lock_guard<std::mutex> lock( s.mutex );
+	return s.path;
+}
+
+std::string modulePath()
+{
+#if defined( _WIN32 )
+	HMODULE module = nullptr;
+	if( GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                        reinterpret_cast< LPCSTR >( &modulePath ), &module )
+	    && module != nullptr )
+	{
+		char buffer[ MAX_PATH ] = {};
+		if( GetModuleFileNameA( module, buffer, MAX_PATH ) > 0 )
+			return buffer;
+	}
+	return "unknown";
+#else
+	//The address of this function is inside whatever image this code was
+	//linked into, so dladdr names that image -- the loaded bundle in a host,
+	//and the executable itself in the offline harness.
+	Dl_info info {};
+	if( dladdr( reinterpret_cast< const void* >( &modulePath ), &info ) != 0 && info.dli_fname != nullptr )
+		return info.dli_fname;
+	return "unknown";
+#endif
 }
 
 } // namespace genlock::diag

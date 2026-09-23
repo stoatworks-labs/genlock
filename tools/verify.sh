@@ -54,6 +54,12 @@ cd "$(dirname "$0")/.."
 BUILD="${BUILD:-build-universal}"
 failures=0
 
+# The harness and the sweep instantiate the real plugin, which logs. Keep
+# their lines out of ~/Library/Logs/genlock, which is the log an Arena run is
+# read from -- see "Reading the log after an Arena run" in AGENTS.md.
+GENLOCK_LOG_DIR="${GENLOCK_LOG_DIR:-$( mktemp -d )/logs}"
+export GENLOCK_LOG_DIR
+
 step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 pass() { printf '   \033[32mok\033[0m   %s\n' "$1"; }
 fail() { printf '   \033[31mFAIL\033[0m %s\n' "$1"; failures=$(( failures + 1 )); }
@@ -242,6 +248,17 @@ if [ "$(uname)" = "Darwin" ] && [ -d "$BUNDLE" ]; then
 		case "$out" in
 			*"inputs:      2..2"*) pass "the host is told to give it two inputs" ;;
 			*) fail "wrong input count -- SetMinInputs/SetMaxInputs are separate from the type" ;;
+		esac
+		# oxbow dlopens the bundle the way a host does, so the plugin's
+		# load-time log line must now name the bundle's own binary. That is
+		# the file-scope constructor running inside a real dlopen, and
+		# Diag::modulePath answering with the image that was loaded rather
+		# than with the harness.
+		logged=$(cat "$GENLOCK_LOG_DIR"/*.log 2>/dev/null)
+		case "$logged" in
+			*"loaded from "*"Genlock.bundle/Contents/MacOS/Genlock"*)
+				pass "a dlopen logs the path it was loaded from, at load time" ;;
+			*) fail "no load-time line naming the bundle in $GENLOCK_LOG_DIR" ;;
 		esac
 	else
 		printf '   skipped: oxbow not built at %s\n' "$OXBOW"

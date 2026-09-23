@@ -43,6 +43,16 @@ public:
 	float GetFloatParameter( unsigned int index ) override;
 	FFResult SetTime( double time ) override;
 
+	/// None of these three change a pixel. They exist so that ONE session in
+	/// front of Resolume leaves a log that answers the things about mixers
+	/// this repo has never been able to measure -- see "Reading the log after
+	/// an Arena run" in AGENTS.md. SetHostInfo in particular makes the log
+	/// self-identifying: it names the host and its version, so a log is
+	/// evidence about a known build rather than about "Resolume".
+	void SetHostInfo( const char* hostname, const char* version ) override;
+	void SetBeatInfo( float bpm, float barPhase ) override;
+	void SetSampleRate( unsigned int sampleRate ) override;
+
 	char* GetTextParameter( unsigned int index ) override;
 
 	/// Declared only so the About line can accept its own default.
@@ -190,6 +200,21 @@ private:
 	Fault fault                  = FAULT_NONE;
 	const char* fragmentOverride = nullptr;
 
+	/// What the log has already said, so a host calling something on every
+	/// frame writes one line rather than sixty a second. See "Reading the log
+	/// after an Arena run" in AGENTS.md for what each line answers.
+	struct LogState
+	{
+		unsigned long frames    = 0;
+		unsigned long beatCalls = 0;
+		unsigned long timeCalls = 0;
+		unsigned guardsLogged   = 0;///< one bit per guard that has fired
+		int opacityLines        = 0;
+		float lastOpacity       = -1.0f;
+		bool firstTimeLogged    = false;
+	};
+	LogState logState;
+	void logClock( const char* when );
 
 	float params[ PT_COUNT ] = {};
 
