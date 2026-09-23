@@ -2573,8 +2573,9 @@ int runDefaults()
 
 	//The shape of the parameter list. Two parameters were inserted in front
 	//of the About block, which must still close it.
-	Check( Genlock::PT_COUNT == 25,
-	       fmt( "%.0f parameters: 21 controls and the 4-entry About block", static_cast< double >( Genlock::PT_COUNT ) ) );
+	//26 since v0.1.0's registration: the user guide is a fifth About entry.
+	Check( Genlock::PT_COUNT == 26,
+	       fmt( "%.0f parameters: 21 controls and the 5-entry About block", static_cast< double >( Genlock::PT_COUNT ) ) );
 	Check( Genlock::PT_ABOUT_FIRST == 21 && std::strcmp( plugin.GetParamName( Genlock::PT_ABOUT_FIRST ), "About" ) == 0,
 	       "the About block starts at 21 and is last" );
 	bool aboutOnlyAtEnd = true;

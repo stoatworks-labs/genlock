@@ -163,9 +163,9 @@ M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and Crawl Wrap rows
 | Crawl Wrap | at 4 pixels of the mode: **3** wraps in lores and **6** in hires over 60 frames, as predicted; the key walks **7.933 of 8.000** texels before it snaps |
 | Negative controls | each of the four mode claims re-run against a plugin with the wrong answer built in **fails in the picture**, at both rasters; a one-character mutation of the shipped GLSL fails the Key Delay check |
 | The defaults are the old plugin | the crawl and delay match the pre-feature formula **bit for bit** over 60 frames; and against the previous commit's own harness, eight scenes rendered **byte-identical PNGs** (checked once, by hand) |
-| No dead controls | all **21** sweepable of the 25 parameters measurably change the picture, at 480×270 and 320×180; the other four are the About buttons, which `tools/sweep.py` skips |
+| No dead controls | all **21** sweepable of the 26 parameters measurably change the picture, at 480×270 and 320×180; the other five are the About text and its buttons, which `tools/sweep.py` skips |
 | macOS binary | a local build is universal (`x86_64 arm64`), exports `plugMain`, and ad-hoc signs |
-| Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2 / 25 params**, and loading it that way writes the load-time log line naming the bundle |
+| Host metadata | `oxbow probe` reads **SW Genlock / GL01 / mixer / inputs 2..2 / 26 params**, and loading it that way writes the load-time log line naming the bundle |
 | Render cost | **under 0.12 ms/frame at 4K** — 0.7% of a 60 fps frame. One pass and three texture fetches is so cheap that repeated runs vary by a factor of two (0.04 to 0.12 ms at 4K, 0.024 to 0.036 at 1080p); the figure worth quoting is the ceiling, not a mean |
 
 Run `tools/verify.sh` before believing any of it.
@@ -204,6 +204,10 @@ questions above. [AGENTS.md](AGENTS.md) says what each line answers.
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, the traps, and the fleet's only written account of
 how an FFGL mixer actually behaves.
+
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
 
 ## Licence
 

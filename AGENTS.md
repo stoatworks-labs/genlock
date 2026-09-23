@@ -589,7 +589,7 @@ moving anything.
   `--defaults` is its standing proxy.
 - **A one-character mutation of the shipped GLSL fails a check** (`--mutation`).
 - **No dead controls.** All **21** sweepable parameters measurably change the
-  picture, at 480×270 and at CI's 320×180; the other four are the About buttons,
+  picture, at 480×270 and at CI's 320×180; the other five are the About text and buttons,
   which `tools/sweep.py` skips.
 - **The load-time log line works in a real `dlopen`**: `oxbow probe` loads the
   bundle and the log says `loaded from .../Genlock.bundle/Contents/MacOS/Genlock`
@@ -598,7 +598,8 @@ moving anything.
 - **The build is universal and exports `plugMain`** — `lipo` reports
   `x86_64 arm64`, `nm -gU` finds `_plugMain`, the plist names a binary that
   exists, and it ad-hoc signs.
-- **A host sees `SW Genlock` / `GL01` / mixer / inputs 2..2 / 25 params**
+- **A host sees `SW Genlock` / `GL01` / mixer / inputs 2..2 / 26 params** (25 until the
+  About block gained its User guide button at registration)
   through `oxbow probe`, with Amiga Mode at index 7 and Crawl Wrap at 11 in the
   Timing group.
 - **The render cost**, by `gltest --bench` (120 frames each, after a 20-frame
