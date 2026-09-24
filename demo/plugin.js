@@ -531,6 +531,9 @@ const PARAMS = [
 
 const mounted = mountDemo({
   name: 'Genlock',
+  // The FFGL type the plugin registers (PluginInfo), for the kit banner's
+  // closing sentence, which said "effect" on every page until 2026-09-24.
+  kind: 'mixer',
   pluginId: 'GL01',
   tagline:
     'An Amiga genlock, flaws and all: this layer’s colour 0 keyed over the layer below — but the key is cut on the computer’s own pixel clock, which is not locked to the video. So it lands a pixel away from its fill, every edge carries a coloured fringe, and as the two clocks drift the fringe crawls. Drop Sync Quality below a half and the overlay loses vertical lock and rolls.',
@@ -577,7 +580,7 @@ const mounted = mountDemo({
     'Opacity is a slider here. In Resolume it is the layer’s opacity fader: Arena binds a mixer parameter named Opacity to it, and writes to the mixer’s own Opacity never reach the plugin.',
     'The CPU half is a port to JavaScript that nothing checks but a reader: the control conversions from Controls.cpp, the crawl and roll phases from Timing.cpp, and the uniform arithmetic of ProcessOpenGL. The shader is the plugin’s, and demo/tools/check_shaders.py fails the repository’s verify script if a character of it drifts from source/Shaders.cpp.',
     'The clock is the page’s. The plugin works out whether its host speaks seconds or milliseconds by voting against a wall clock, then runs from its own epoch; the page’s clock is already seconds from zero, so neither is needed. Restart is a new epoch, as re-triggering the clip is in the plugin.',
-    'The banner’s closing sentence is the shared kit’s, identical on every demo page, and calls the plugin an effect. Genlock is an FFGL mixer: in Resolume it is chosen as a layer’s Blend Mode, not added as an effect.',
+    'Genlock is an FFGL mixer, as the banner says: in Resolume it is chosen as a layer’s Blend Mode, not added as an effect.',
     'The presets are this page’s shortcuts, not the plugin’s: Genlock ships no presets. Each one only sets ordinary parameter values. The About block, which exists so a host has somewhere to put links, is absent.',
     'Nothing here is measured. The whole-pixel key delay translating the key exactly, the fractional delay recovered from partial coverage, the crawl against its closed form, the roll at two rasters and the crawl’s speed bit-identical across the three modes are tools/gltest in the repository, and that harness — not this page — is the reason to believe the timing model. The plugin has been loaded in Arena on Windows on software rendering and no frame of its output has ever been captured there.',
   ],

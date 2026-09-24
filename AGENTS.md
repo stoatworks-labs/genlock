@@ -568,8 +568,8 @@ fleet's first demo of a **mixer**, so several of its decisions are new.
   status line under the picture shows key delay + crawl, the crawl rate and
   the lock state — the numbers the Diag log carries.
 - **The About block is absent.** No audio caveat: Genlock has no audio path.
-- **The banner calls it an "FFGL effect"**: that closing sentence is the kit's
-  and fixed on every page. The disclosure says Genlock is a mixer.
+- **The banner says "FFGL mixer"** because `plugin.js` sets `kind: 'mixer'`
+  (the kit's closing sentence said "effect" on every page until 2026-09-24).
 
 Deploy from the repo root with `cf-run npx wrangler deploy` and verify by
 content: `curl -s 'https://genlock-demo.stoatworks-labs.com/?cb=1' | grep -o
