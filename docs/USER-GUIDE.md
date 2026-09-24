@@ -298,7 +298,10 @@ average. No timing has been taken inside Resolume.
   Wrap ceiling is derived from the colour burst, not measured on a genlock.
 - **The tear at the roll seam is a look, not a model**, and premultiplied alpha is
   assumed for both inputs.
-- **No presets, no OpenFX port and no browser demo.**
+- **No presets and no OpenFX port.**
+- **There is a browser demo** at [genlock-demo.stoatworks-labs.com](https://genlock-demo.stoatworks-labs.com).
+  It is a port to a web page, not the plugin: the shaders run in WebGL2 and any CPU
+  half is rewritten in JavaScript. The page lists what it does not reproduce.
 
 ---
 
