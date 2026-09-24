@@ -573,8 +573,9 @@ fleet's first demo of a **mixer**, so several of its decisions are new.
 
 Deploy from the repo root with `cf-run npx wrangler deploy` and verify by
 content: `curl -s 'https://genlock-demo.stoatworks-labs.com/?cb=1' | grep -o
-'<title>[^<]*'`. There is no `deploy.yml`; the page ships when somebody runs
-that.
+'<title>[^<]*'`. `.github/workflows/deploy.yml`
+(the fleet's, from idler) redeploys the Worker on every push to main and checks
+the live `<head>` against the build.
 
 ---
 
