@@ -1,40 +1,35 @@
 # Genlock
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. The timing model is not
-> asserted but measured: an offline harness drives the real plugin class in a
-> headless GL context, with **two** input textures at two different resolutions,
-> and checks each claim against an independent statement of the same arithmetic
-> — a whole-pixel key delay translating the key **exactly, 0 of 164 bytes
-> different**, a fractional one recovered from partial coverage at **0.4941
-> output texels against a predicted 0.5000**, the crawl following the closed
-> form its clock error predicts to **0.0176 texels over 30 frames**, the
-> roll landing **within 0.0000 rows** at two different rasters, and the crawl's
-> speed across the picture **bit-identical** in lores, hires and superhires (see
-> [Status](#status)). It has **never been loaded into Resolume on macOS**; on
-> Windows, Arena 7.27.1 loads it as a layer blend mode, drives it every frame
-> with both inputs and its clock, and binds its Opacity to the layer's opacity
-> fader — measured from the plugin's own log, on software rendering, with no
-> pixels captured. **Arena does not show the Key Source control, so in Resolume
-> the key is always Colour 0** (see [Status](#status)). It is the fleet's first
-> FFGL *mixer*. Check it in your own rig before trusting it in a show.
+> (Anthropic), directed and reviewed by a human author. It has **never been loaded into
+> Resolume on macOS**. On Windows, Arena 7.27.1 loads it as a layer blend mode, drives it every
+> frame with both inputs and its clock, and binds its Opacity to the layer's opacity fader.
+> That's measured from the plugin's own log, on software rendering, with no pixels captured.
+> **Arena doesn't show the Key Source control, so in Resolume the key is always Colour 0** (see
+> [Status](#status)). The timing model itself is measured by an offline harness that drives the
+> real plugin class in a headless GL context, with **two** input textures at two different
+> resolutions, checking each claim against an independent statement of the same arithmetic;
+> the results are in the tables under Status. It's the fleet's first FFGL *mixer*. Check it in
+> your own rig before you trust it in a show.
 
-An Amiga genlock — flaws and all — as an FFGL **mixer** for
-[Resolume](https://resolume.com) Arena and Avenue.
+An Amiga genlock, flaws and all, as an FFGL **mixer** for
+[Resolume](https://resolume.com) Arena and Avenue. It keys the computer's colour 0 over the
+layer below on a clock that's a few parts per million out, so you get the fringe, the crawl
+and the roll that came free with the original hardware.
 
 ![The computer's picture keyed over video, with a coloured fringe down one side of every edge](docs/hero.png)
 
-<sub>The repo's two test cards through the plugin at a three-pixel key delay —
-rendered by `gltest`, the offline harness, not captured from Resolume. The band
+<sub>The repo's two test cards through the plugin at a three-pixel key delay,
+rendered by `gltest`, the offline harness, rather than captured from Resolume. The band
 down every graphic's edges is where the key and the fill disagree: at a left
-edge it is the palette's colour 0 laid over the video, at a right edge it is
+edge it's the palette's colour 0 laid over the video, at a right edge it's
 video cut into the graphic, and Edge Tint has coloured both.</sub>
 
-**[Try it in your browser](https://genlock-demo.stoatworks-labs.com)** — the
+**[Try it in your browser](https://genlock-demo.stoatworks-labs.com)**: the
 plugin's own shader ported to WebGL2, mixing a generated clip (or your own
 video) for the layer below with the harness's own test cards for this layer,
-with every control. It is a port and not the plugin: read what
-[the page itself says it does not reproduce](https://genlock-demo.stoatworks-labs.com).
+with every control. It's a port rather than the plugin, so do read
+[what the page itself says it doesn't reproduce](https://genlock-demo.stoatworks-labs.com).
 
 <!-- downloads:start -->
 
@@ -70,36 +65,37 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 ## The key comes from the wrong clock
 
-That is the whole design, and everything else follows from it.
+That's the whole design, and everything else follows from it.
 
-An Amiga genlock keys the computer's colour 0 over incoming video. The video
-sets the timing. **The computer does not follow it** — the key is cut on the
+An Amiga genlock keys the computer's colour 0 over incoming video, and the video
+sets the timing. **The computer doesn't follow it**, though: the key is cut on the
 Amiga's own pixel clock, which free-runs a few parts per million away from the
-video's. So the key edge arrives a pixel or so from the fill it belongs to, and
+video's. So the key edge arrives a pixel or so away from the fill it belongs to, and
 because the two clocks differ, that error walks.
 
 - **A coloured fringe** down one side of every overlay edge. Where the key says
   "computer" and the fill is still colour 0, the palette's background lands on
   the video. Where it says "video" and the fill is already the graphic, video
   cuts into the graphic. Which one you get is the **sign** of `Key Delay`, and
-  both are things that really happened.
+  both happened on the real kit.
 - **The fringe crawls.** `Clock Error` is in parts per million, and the crawl
   rate falls out of it: the Amiga's 7.09379 MHz lores pixel clock times the
   fractional error. A real genlock re-locks on every line sync, so only the
-  remainder survives — the fringe walks as far as `Crawl Wrap` allows (one
+  remainder survives. The fringe walks as far as `Crawl Wrap` allows (one
   Amiga pixel by default) and snaps back, over and over. At 0.01 ppm one lores
-  pixel takes fourteen seconds; at 50 ppm, an ordinary crystal's tolerance, it
-  is a blur.
+  pixel takes fourteen seconds; at 50 ppm, an ordinary crystal's tolerance, it's
+  a blur.
 - **Loss of vertical lock.** Drop `Sync Quality` below half and the overlay
-  rolls at `Roll Rate` and tears at the seam. The video does not move — the
-  overlay is the thing that has lost lock.
-- **A three-position fader**, because that is what the hardware had: Video,
+  rolls at `Roll Rate` and tears at the seam. The video stays put, because it's
+  the overlay that has lost lock.
+- **A three-position fader**, because that's what the hardware had: Video,
   Overlay, Dissolve, and a dissolve pot.
 
-[resolume-luma-keyer](https://github.com/stoatworks-labs/resolume-luma-keyer) is
-the keyer that works. Here the flaws are the product.
+If you want a keyer that behaves itself, that's
+[resolume-luma-keyer](https://github.com/stoatworks-labs/resolume-luma-keyer). This one is
+here for the flaws.
 
-**It is a mixer, not an effect.** It needs a layer below it: that layer is the
+**It's a mixer rather than an effect.** It needs a layer below it: that layer is the
 incoming video, and the clip on this layer is the computer's picture. In
 Resolume a mixer is chosen as a layer's **Blend Mode** (the same list serves as
 the transition list), so set the upper layer's Blend Mode to SW Genlock.
@@ -109,52 +105,51 @@ https://stoatworks-labs.com/software/genlock/guide/
 
 [![Genlock — an Amiga-style genlock, flaws and all, as a Resolume mixer](docs/video-thumb.png)](https://www.youtube.com/watch?v=g_ieK_B1WiU)
 
-*[Watch it](https://www.youtube.com/watch?v=g_ieK_B1WiU) — 52 seconds: colour
+*[Watch it](https://www.youtube.com/watch?v=g_ieK_B1WiU) (52 seconds): colour
 0 keyed out to show the video, Key Delay spilling colour 0 one side and
 cutting video in on the other, the fringe crawling on a clock a few ppm off,
 Amiga Mode's lores, hires and superhires, the overlay losing lock and rolling,
-and the three-position fader. Every frame is the real plugin's output: an FFGL
-plugin has no window, so the footage is rendered by this repository's own
-offline harness (`gltest --pipe`, driven by a cue sheet) rather than filmed
-off a screen; the video is Resolume's bundled demo media and the overlay is
-drawn by the render script.*
+and the three-position fader. It's all the plugin's own output. An FFGL plugin
+doesn't have a window to film, so the footage comes from this repo's offline
+harness (`gltest --pipe`, driven by a cue sheet) rather than a screen; the video
+is Resolume's bundled demo media and the overlay is drawn by the render script.*
 
 ## The controls
 
-**Key** — Key Source (Colour 0, Luma or Alpha), Key Colour as a swatch (the
+**Key:** Key Source (Colour 0, Luma or Alpha), Key Colour as a swatch (the
 default is Workbench blue, `#0055AA`), Tolerance, Softness and Invert. Arena
-7.27.1 does not expose Key Source, so in Resolume the key is always Colour 0
+7.27.1 doesn't expose Key Source, so in Resolume the key is always Colour 0
 (see [Status](#status)).
 
-**Timing** — Amiga Mode (Lores, Hires or Superhires), Key Delay (−8 to +8
+**Timing:** Amiga Mode (Lores, Hires or Superhires), Key Delay (−8 to +8
 Amiga pixels, signed; negative lays colour 0 over the video, positive cuts video
 into the fill), Clock Error (0.01 to 50 ppm, geometrically), Crawl Rate, Crawl
 Wrap (1 to 16 Amiga pixels: how far the fringe walks before the line sync
-pulls it back — one is a genlock that re-locks cleanly, sixteen is the length
+pulls it back; one is a genlock that re-locks cleanly, sixteen is the length
 of the PAL colour burst it locks to), Sync Quality and Roll Rate.
 
 One Amiga pixel is 1/320 of the picture width in lores, 1/640 in hires and
-1/1280 in superhires, at every raster — an Amiga line is that many pixels
+1/1280 in superhires, at every raster. An Amiga line is that many pixels
 across the active picture whatever the monitor is, so a one-pixel fringe is the
 same fraction of the frame at 720p and at 4K. The mode decides what an "Amiga
-pixel" means, and it moves only what the computer counts in its own pixel
+pixel" means, and it only moves what the computer counts in its own pixel
 clocks: Key Delay and Crawl Wrap are half the distance in hires and a quarter
 in superhires. The crawl's *speed* across the picture and the tear's throw are
-time errors in the incoming video, and are the same in every mode. The defaults
-— lores, a one-pixel wrap — render exactly what the plugin rendered before
+time errors in the incoming video, so they're the same in every mode. The defaults
+(lores, a one-pixel wrap) render exactly what the plugin rendered before
 either control existed.
 
-**Fader** — the three-position switch, and the Dissolve pot that only exists at
+**Fader:** the three-position switch, and the Dissolve pot that only exists at
 the Dissolve position.
 
-**Look** — Fringe and Edge Tint, which colour the band where the key and the
+**Look:** Fringe and Edge Tint, which colour the band where the key and the
 fill disagree (the disagreement is there without them; real hardware puts chroma
-crosstalk on it, and this is where you say how much), and Opacity — which in
+crosstalk on it, and this is where you say how much), and Opacity, which in
 Resolume is the layer's own Opacity fader, measured on Arena 7.27.1.
 
 ## Build
 
-Needs CMake and the Resolume FFGL SDK, which is a submodule.
+You'll need CMake and the Resolume FFGL SDK, which is a submodule.
 
 ```bash
 git clone --recursive https://github.com/stoatworks-labs/genlock
@@ -165,21 +160,21 @@ cmake --install build    # → ~/Documents/Resolume Arena/Extra Effects
 ```
 
 macOS builds universal (arm64 + x86_64) by default. Add
-`-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
+`-DCMAKE_OSX_ARCHITECTURES=arm64` for a quicker development build.
 
-The install path is **Extra Effects**, although this is a mixer. Resolume has one
+The install path is **Extra Effects**, even though this is a mixer. Resolume has one
 FFGL folder, and sources, effects and mixers all load from it: Arena 7's binary
-names no other, and the FFGL SDK sends its own mixer example there. Measured on
-Windows too (Arena 7.27.1, 2026-09-23): there is no `Extra Mixers` folder, and
+names no other, and the FFGL SDK sends its own mixer example there. I checked on
+Windows too (Arena 7.27.1, 2026-09-23): there's no `Extra Mixers` folder, and
 `Genlock.dll` in Extra Effects loaded and registered as a mixer. (Before
 v0.1.0 this said `Extra Mixers`, which Arena never reads.)
 
 ## Building and testing
 
-The harness renders the real plugin class headlessly. It is the first in this
-fleet to drive **two** inputs — `--input-a` is Dest, the layer below;
-`--input-b` is Src, this layer — and they may be different sizes, with different
-hardware padding, rendered to an output that is a third size again.
+The harness renders the real plugin class headlessly. It's the first in this
+fleet to drive **two** inputs (`--input-a` is Dest, the layer below;
+`--input-b` is Src, this layer), and they can be different sizes, with different
+hardware padding, rendered to an output that's a third size again.
 
     ./build/gltest --out /tmp/frame.png     both cards, through the plugin
     ./build/gltest --list                   every parameter, kind and default
@@ -196,20 +191,20 @@ hardware padding, rendered to an output that is a third size again.
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
 
-Every tolerance in there is derived from something physical — one output texel,
-one source texel, one 8-bit code, the raster's own height — rather than from the
+Every tolerance in there is derived from something physical (one output texel,
+one source texel, one 8-bit code, the raster's own height) rather than from the
 number this machine printed first. A whole-texel displacement translates an
-image exactly and is asserted as **byte equality**; a fractional one exists only
-in the filter's interpolation and gets a derived tolerance. They are never
+image exactly and is asserted as **byte equality**; a fractional one only exists
+in the filter's interpolation and gets a derived tolerance. They're never
 checked by the same measurement. [AGENTS.md](AGENTS.md) lists every number and
 where it comes from.
 
 ## Status
 
-**Released at v0.1.0 on 2026-09-23, and honestly early.** Verified by
+**Released at v0.1.0 on 2026-09-23, and still early days.** Verified by
 measurement on an Apple M4 Max, macOS 26.4.1, 2026-09-22; the Amiga Mode and
-Crawl Wrap rows, the CI rows and the Windows host row 2026-09-23 (what Arena
-does with it once chosen is the table after this one):
+Crawl Wrap rows, the CI rows and the Windows host row on 2026-09-23 (what Arena
+does with it once it's chosen is the table after this one):
 
 | Check | Result |
 | --- | --- |
@@ -236,16 +231,16 @@ does with it once chosen is the table after this one):
 | Windows host | Resolume Arena **7.27.1**, Windows x64 (Mesa llvmpipe): `Genlock.dll` in Extra Effects **loaded** and registered as `'SW Genlock' uid: GL01 category: 2` — the category Resolume's own blend modes and transitions register under — and **SW Genlock is in every layer's Blend Mode list**. There is no Extra Mixers folder on Windows either |
 | Render cost | **under 0.12 ms/frame at 4K** — 0.7% of a 60 fps frame. One pass and three texture fetches is so cheap that repeated runs vary by a factor of two (0.04 to 0.12 ms at 4K, 0.024 to 0.036 at 1080p); the figure worth quoting is the ceiling, not a mean |
 
-Run `tools/verify.sh` before believing any of it.
+Run `tools/verify.sh` before you believe any of it.
 
-**How Arena drives it — measured 2026-09-23** in Resolume Arena 7.27.1 (build
+**How Arena drives it, measured 2026-09-23** in Resolume Arena 7.27.1 (build
 15990) on win-lab (Windows x64, Mesa llvmpipe, no GPU), with a CI (MSVC) build
-of the v0.1.0 source: SW Genlock set as layer 2's Blend Mode over layer 1, both
+of the v0.1.0 source. SW Genlock was set as layer 2's Blend Mode over layer 1, both
 layers carrying a still picture, driven through Arena's REST API, and the
 plugin's own log (`%LOCALAPPDATA%\genlock\logs\genlock.2026-09-23.log`) read
-back. A manual probe: the fleet's Arena gate cannot gate a mixer (it knows
-registration categories 1 and 3 only, looks for the plugin in the source list,
-and can only mount a clip effect or a source).
+back. It was a manual probe, because the fleet's Arena gate can't gate a mixer: it
+only knows registration categories 1 and 3, looks for the plugin in the source list,
+and can only mount a clip effect or a source.
 
 | Question | Measured answer |
 | --- | --- |
@@ -258,32 +253,32 @@ and can only mount a clip effect or a source).
 | Are the parameters all there? | **25 of 26.** Every name, type and default in Arena's mixer panel matches the declaration, except that **Key Source is not exposed at all** |
 
 **Known limitation: in Resolume, Key Source is stuck at Colour 0.** Arena's
-mixer panel leaves out Key Source — the first declared parameter, id 0 — so the
-key is always the default Colour 0 there, and Luma and Alpha keying cannot be
-reached. Why is not known (one guess: Arena treats a mixer's first parameter
-specially). It was found on Windows; macOS has not been looked at.
+mixer panel leaves out Key Source (the first declared parameter, id 0), so the
+key is always the default Colour 0 there, and Luma and Alpha keying can't be
+reached. I don't know why (one guess: Arena treats a mixer's first parameter
+specially). It was found on Windows; I haven't looked on macOS.
 
-What that run did **not** show is a picture: a mixer's output exists only in the
-composition, and Arena's REST thumbnails do not serve it. So "renders correctly
-in Arena" is not claimed — only that it initialised and was called every frame
+What that run did **not** show is a picture: a mixer's output only exists in the
+composition, and Arena's REST thumbnails don't serve it. So I'm not claiming it
+"renders correctly in Arena", only that it initialised and was called every frame
 with no error lines.
 
-**Not done, and the honest list is long.** It has **never been loaded into
+**Not done yet, and it's a long list.** It has **never been loaded into
 Resolume on macOS**, and no frame of its output in Resolume has been looked at.
 Whether a mixer is ever called with one input (the SDK example's claim) and
 whether the layer's transition moves `Opacity` are still open. The CI run proves
 the checks on a second rasteriser, and the Arena run above was on software
 rendering; the render cost is still macOS-only. The
 universal build has never run on an Intel Mac. Premultiplied alpha is assumed
-rather than measured. The **tear** at the roll seam is a look, not a model:
+rather than measured. The **tear** at the roll seam is a look rather than a model:
 nothing measures it and no real hardware was consulted. There are **no
 presets** and no OpenFX port. The [browser demo](https://genlock-demo.stoatworks-labs.com)
 runs the plugin's shader but not the plugin, and says how it differs.
 
-**Amiga Mode and Crawl Wrap are arithmetic, not observation.** The rule — pixel
-clocks scale with the mode, time errors do not — is argued in `Controls.h` and
-measured against itself; nobody has compared a hires Workbench through a real
-genlock, and a composite-rate genlock's real bandwidth may make superhires look
+**Amiga Mode and Crawl Wrap come from arithmetic, not observation.** The rule (pixel
+clocks scale with the mode, time errors don't) is argued in `Controls.h` and
+measured against itself. Nobody has compared a hires Workbench through a real
+genlock, and a composite-rate genlock's actual bandwidth may make superhires look
 nothing like a quarter-size lores fringe. The 16-pixel ceiling on Crawl Wrap is
 derived from the length of the colour burst, not measured on any genlock. PAL
 only: no NTSC.
@@ -295,7 +290,7 @@ The first Arena session (above) settled the clock, the inputs and the `Opacity`
 binding; the one-input call and the transition are still open.
 [AGENTS.md](AGENTS.md) says what each line answers.
 
-[AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
+[AGENTS.md](AGENTS.md) has the full list of what's assumed rather than
 measured, the open questions, the traps, and the fleet's only written account of
 how an FFGL mixer actually behaves.
 
